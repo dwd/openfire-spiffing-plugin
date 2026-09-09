@@ -1,0 +1,34 @@
+package org.igniterealtime.openfire.spiffing;
+
+import io.cridland.spiffing.Site;
+import org.dom4j.Element;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+
+final class Fixtures {
+    static String read(String name) {
+        try (var stream = Fixtures.class.getResourceAsStream("/fixtures/" + name + ".xml")) {
+            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+        } catch (Exception e) { throw new AssertionError(e); }
+    }
+
+    static Settings settings() { return settings(LabelFormat.ESS); }
+
+    static Settings settings(LabelFormat output) {
+        return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
+            read("food-label-milk-chocolate"), LabelFormat.XML, output);
+    }
+
+    static Element envelope(String fixture, LabelFormat format) {
+        Site site = new Site();
+        site.load(read("food-policy"));
+        var label = site.label(read(fixture));
+        byte[] data = label.write(format.format);
+        String payload = format == LabelFormat.ESS
+            ? "<esssecuritylabel xmlns='" + PolicyConfiguration.ESS_NAMESPACE + "'>" + Base64.getEncoder().encodeToString(data) + "</esssecuritylabel>"
+            : new String(data, StandardCharsets.UTF_8);
+        return xml("<securitylabel xmlns='" + PolicyConfiguration.NAMESPACE + "'><label>" + payload + "</label></securitylabel>");
+    }
+
+    static Element xml(String xml) { return SecureXml.parse(xml, SecureXml.MAX_DOCUMENT); }
+}

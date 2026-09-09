@@ -1,13 +1,18 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
-        "http://www.w3.org/TR/html4/loose.dtd">
+<!DOCTYPE html>
 <html lang="en">
-<head>
-    <title>Example Plugin</title>
-</head>
+<head><meta charset="UTF-8"><title>Spiffing for Openfire</title></head>
 <body>
-<h1>Example Plugin</h1>
-<p>This is an example of a plugin for Openfire using the Maven build system.
-See <a href="https://download.igniterealtime.org/openfire/docs/latest/documentation/plugin-dev-guide.html">Openfire Plugin Developer Guide</a>
-</p>
+<h1>Spiffing for Openfire</h1>
+<p>Server clearance enforcement for XEP-0258 security labels, using Spiffing Java.
+Requires Openfire 5.0.0 or later and Java 22 or later.</p>
+<p>Open Server Settings → Spiffing security labels to configure an Open XML SPIF
+policy, server clearance, and default message label. Ordinary inbound messages
+are blocked until valid configuration is saved.</p>
+<p>Unlabelled messages receive the configured default. Labelled messages must pass
+both policy validation and the server clearance check. ESS, NATO XML, and Spiffy
+XML are supported. Configuration is saved in OPENFIRE_HOME/conf/spiffing.xml.</p>
+<p>This first increment enforces the server clearance. It does not implement
+per-user or per-room clearances, label catalogues, history filtering, cross-policy
+translation, or cluster-wide configuration distribution.</p>
 </body>
 </html>

@@ -1,3 +1,4 @@
 .idea/
 target/
-exampleplugin.iml
+*.iml
+.build/

@@ -1,32 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <plugin>
     <!-- Main plugin class -->
-    <class>org.igniterealtime.openfire.exampleplugin.ExamplePlugin</class>
+    <class>org.igniterealtime.openfire.spiffing.SpiffingPlugin</class>
     <!-- Plugin metadata -->
     <name>${project.name}</name>
     <description>${project.description}</description>
-    <author>${project.developers[0].name}</author>
+    <author>Spiffing contributors</author>
     <licenseType>apache</licenseType>
     <version>${project.version}</version>
     <!-- set release date here -->
-    <date>2024-09-12</date>
+    <date>2026-09-09</date>
     <!-- Minimal supported Openfire version, same as Maven "plugins" parent pom -->
     <minServerVersion>5.0.0</minServerVersion>
-    <!-- And if it won't work after:
-    <priorToServerVersion>4.3.0</priorToServerVersion>
-    -->
-    <!-- Set Java version if it higher than used by Openfire
-    <minJavaVersion>21</minJavaVersion>
-    -->
+    <minJavaVersion>22</minJavaVersion>
 
     <!-- Admin console entries -->
     <adminconsole>
         <tab id="tab-server">
             <sidebar id="sidebar-server-settings">
-                <item id="example-plugin-page"
-                      name="Example Plugin Properties"
-                      url="exampleplugin-page.jsp"
-                      description="Settings for Example Plugin"/>
+                <item id="spiffing-settings"
+                      name="Spiffing security labels"
+                      url="spiffing-settings.jsp"
+                      description="Server security policy, clearance and default message label"/>
             </sidebar>
         </tab>
     </adminconsole>

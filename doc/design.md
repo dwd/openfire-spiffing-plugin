@@ -1,0 +1,233 @@
+# XEP-0258 plugin design
+
+Status: first server-enforcement increment implemented, September 9, 2026.
+
+## Objective and confirmed requirements
+
+Replace the example skeleton with a plugin using the Java port in
+`../spiffing-java`. Administrators configure an Open XML SPIF policy, server
+clearance, and default message label in the Openfire Admin Console. Validate the
+default against both the policy and clearance before accepting configuration.
+Check inbound messages against the server clearance. Unlabelled messages assume
+and are stamped with the default label.
+
+Maintain this document with implementation decisions and add useful tests,
+including negative cases and policy boundaries, as functionality changes.
+
+## Initial choices awaiting user refinement
+
+The following defaults were proposed in clarification questions and used for this
+increment; they can be revised independently of the confirmed requirements:
+
+- Accept ESS, NATO XML, and Spiffy XML labels. Expose independent input format
+  selectors and a default-label output selector, initially ESS.
+- Block ordinary inbound messages while unconfigured or after invalid startup
+  configuration. A working configuration remains active when an Admin Console
+  save is rejected.
+
+The server clearance covers local-client and federated traffic. No per-user or
+per-room clearance is inferred from the server clearance.
+
+## Components and configuration lifecycle
+
+`Settings` holds the policy, clearance, default-label payload, two input formats,
+and one output format. It serializes these as a versioned XML document, with the
+input documents escaped as text. The Admin Console accepts payloads, not full
+XEP-0258 envelopes. ESS inputs are base64 ASN.1; XML inputs are literal XML.
+
+`PolicyConfiguration` creates a private Spiffing `Site`, loads exactly one policy,
+and parses the clearance and default label against that same registry. It calls
+both `Spif.assertValid(label)` and `Spif.acdf(label, clearance)`. Spiffing's ACDF
+does not imply policy validity; the two checks are intentionally independent.
+It encodes a default envelope with a policy-derived display marking, parses it
+back, and checks that its security semantics survive the selected serialization.
+This also catches representations that cannot preserve a policy's category types.
+
+`ConfigurationService` serializes writers. It validates a complete candidate,
+persists it, and only then publishes the new snapshot through a volatile
+reference. Message threads read one snapshot per message without waiting for
+saves. Registries and policy objects are privately owned and never mutated after
+publication; mutable envelope templates are copied for each stamped message.
+
+`FileConfigurationStore` writes a temporary file in `OPENFIRE_HOME/conf` and
+atomically replaces `spiffing.xml`. It does not fall back to a non-atomic move.
+A write failure leaves the previous runtime configuration active. On startup,
+a missing, unreadable, oversized, or invalid file leaves enforcement unconfigured
+and blocks ordinary messages. Administrators can recover by saving valid settings.
+The Openfire process needs directory write permission. The file lives outside
+the plugin extraction directory so plugin upgrades do not erase it.
+
+This file-based choice avoids Openfire's `JiveProperties` behavior of swallowing
+SQL write failures while updating its memory cache and emitting change events.
+A configuration save therefore has an observable failure boundary. Atomic rename
+prevents partial files; this increment does not promise power-loss durability via
+file/directory fsync. External file edits are loaded only on plugin restart.
+Configuration distribution and simultaneous administration across cluster nodes
+are not supported; configure each node separately.
+
+The Admin Console relies on Openfire's administrator authentication. Writes
+require POST and matching CSRF cookie/token values. Submitted documents are
+escaped on redisplay, and failed validation preserves the submitted form. The
+page reports generic input errors without exposing parser details or document
+contents in server logs. `SettingsForm` makes request validation testable without
+starting the Admin Console.
+
+## Message processing
+
+`SpiffingPlugin` registers a global `SecurityLabelInterceptor` and advertises
+`urn:xmpp:sec-label:0`. Plugin destruction removes both. The interceptor handles
+only inbound `Message` callbacks before processing (`incoming && !processed`).
+Outbound, postprocessing, IQ, and presence callbacks are outside this increment.
+
+1. For error messages, bypass authorization and stamping. Discard an error with
+   a direct XEP-0258 security label without generating a reply.
+2. Read the active snapshot. If absent, reject with `service-unavailable`.
+3. If no direct XEP-0258 envelope exists, attach a copy of the validated default.
+4. Otherwise require exactly one envelope and check its structure and payload.
+   An empty primary `<label/>` explicitly requests the default; replace that
+   envelope with the generated default after validating any equivalents.
+5. Validate the effective label under the configured policy and test access using
+   the server clearance. A malformed, unsupported, policy-invalid, or denied
+   label is rejected with a generic `forbidden` error. Permitted existing labels
+   and unrelated extensions remain unchanged.
+
+Label selection is namespace-aware. A same-named element in another namespace
+does not authorize a message. Only direct children of the outer message supply
+its label; forwarded inner messages do not authorize the outer stanza and are
+not recursively evaluated by this increment.
+
+All non-error message types are subject to server enforcement, including chat
+state/receipt messages and groupchat subject messages. This deliberately follows
+the requested all-inbound-message scope; XEP-0258's recommendation to exempt MUC
+subject-only changes can be considered with future room-specific handling.
+
+## Label envelope and policy semantics
+
+Supported payloads inside `<label>` or `<equivalentlabel>`:
+
+| Encoding | Payload element | Namespace |
+| --- | --- | --- |
+| ESS | `esssecuritylabel` containing base64 BER/DER | `urn:xmpp:sec-label:ess:0` |
+| NATO XML | `originatorConfidentialityLabel` | `urn:nato:stanag:4774:confidentialitymetadatalabel:1:0` |
+| Spiffy XML | `label` | `http://surevine.com/xmlns/spiffy` |
+
+The envelope contains an optional display marking followed by exactly one primary
+label and zero or more equivalent labels. This follows the specification's prose;
+its embedded schema inconsistently makes the display marking mandatory. Display
+markings are presentation, never authorization inputs. Existing authorized
+markings are preserved; generated defaults use Spiffing's marking.
+
+With only one configured policy, equivalent labels must independently parse,
+validate, pass access control, and represent the same classification/categories
+under that policy. Foreign-policy equivalents and unknown primary policies are
+rejected. This is a deliberately restricted profile: the broader XEP permits
+selecting an appropriate equivalent label and default fallback when no applicable
+label exists. We do not trust unverifiable equivalence claims or silently replace
+an explicit unsupported security label with a potentially less restrictive one.
+Future cross-policy support needs trusted equivalence mappings and explicit policy
+registry management.
+
+Spiffing requires explicit classification membership. Hierarchy does not grant
+access to lower classifications. Restrictive categories require all applicable
+privileges; permissive tags require a matching privilege per represented tag;
+informative categories do not affect access. Validation enforces the loaded
+policy's required and excluded combinations. The plugin delegates these semantics
+to Spiffing instead of recreating an access algorithm.
+
+## Rejection and Openfire integration evidence
+
+The adjacent Openfire source establishes the intended hook:
+
+- `net/StanzaHandler.processMessage`, `SessionPacketRouter`, and
+  `spi/PacketRouterImpl` route inbound messages to `MessageRouter`.
+- `MessageRouter.route` invokes inbound interceptors before route delivery,
+  offline handling, multicast delivery, and carbon generation. Its client-session
+  lookup can yield null for remote senders; enforcement never requires a session.
+- `MessageRouter` only generates its own interception-rejection reply when a
+  client session exists. The plugin instead sends a new error via
+  `RoutingTable.routePacket` for either local or remote senders, then throws an
+  empty `PacketRejectedException` to block the original without a duplicate reply.
+- Errors retain the stanza ID, reverse addresses, and include an error condition,
+  but no original body, thread, extensions, or label. There is no reply when the
+  sender is absent. Reply delivery failure still rejects the original.
+- Internal components that use `PacketRouter` also reach this hook. Direct
+  `RoutingTable`/session delivery paths, including some server-generated messages,
+  history replay, and room fan-out, do not necessarily re-enter it. The plugin does
+  not claim per-recipient delivery filtering on those paths.
+
+Protocol behavior was checked against XEP-0258, both the local
+`../xeps/xep-0258.xml` and the retrieved published specification. The error-message
+exceptions are required by its business rules.
+
+## Input bounds and XML handling
+
+Policy input is limited to 1,048,576 Java characters; clearance/default payloads
+to 65,536 characters each. The settings envelope and file reads are bounded too.
+Incoming label trees are checked iteratively before recursive serialization:
+maximum depth 32, 1,024 elements, and a 65,536-character text/name/attribute budget.
+Openfire's stanza-size limits remain an additional boundary. These limits bound
+plugin work on label data; they are not whole-stanza or whole-server quotas.
+
+Spiffing disables DTDs and external XML resources in policy/label parsing.
+`SecureXml` separately disables DTDs, external entities, and external DTD loading
+for settings and generated XML. Base64 decoding allows only XML whitespace in
+addition to base64 characters, rather than accepting arbitrary MIME garbage.
+Message bodies and full policy/clearance documents are not logged on rejection.
+
+## Build and dependency compatibility
+
+Target Openfire 5.0.0 APIs and Java 22 bytecode, matching Spiffing's minimum runtime.
+The plugin descriptor declares both minimum versions. The plugin depends on
+`io.cridland:spiffing:1.0-SNAPSHOT`; CI checks out and installs Spiffing commit
+`60c474434fc57f9a1ecab7e9549773f3a6656614`. Tests copy MIT-licensed Food policy
+fixtures so the test runtime does not depend on the sibling checkout.
+
+Openfire's parent classloader supplies Bouncy Castle. Declare `bcprov-jdk18on`
+provided and test against Openfire 5.0.0's version 1.78.1. A second compatibility
+run uses version 1.84 from the adjacent Openfire checkout. The archive bundles
+Spiffing and the plugin, without a competing Bouncy Castle JAR. The snapshot
+library dependency must be released/pinned to a published version before a
+release build can satisfy the parent POM's release-dependency rule.
+
+## Tests and remaining verification
+
+The automated suite exercises real Spiffing policy decisions and real XMPP/dom4j
+message objects. Coverage includes:
+
+- All input/output formats, serialization equivalence, immutable default copies,
+  accepted and denied policy fixtures, policy-invalid but ACDF-permitted labels,
+  classification membership, restrictive privileges, and informative categories.
+- Envelope structure, unknown policies/formats, duplicate labels, empty defaults,
+  equivalence checks, namespace confusion, base64 handling, excessive depth/size,
+  and external entities in every administrator document.
+- Every ordinary message type, local-session and null-session handling, default
+  stamping and repeat callbacks, preservation of existing labels/extensions,
+  sanitized rejection addressing, missing configuration, errors without loops,
+  outbound/non-message exclusions, and failed reply delivery.
+- Configuration round trips, complete-save/restart restoration, invalid saves,
+  storage failures, startup recovery, concurrent snapshot reads, actual atomic
+  file replacement and cleanup, CSRF/method/missing-field rejection, and plugin
+  registration/removal/discovery lifecycle.
+
+Local verification: **79 tests passed**, with no failures or skips, against both
+Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
+
+`mvn verify` compiles the Admin Console JSP, runs the suite, and builds the plugin
+archive. Archive inspection checks generated servlet mappings and bundled JARs.
+The file-store tests use a temporary directory; lifecycle tests inject an Openfire
+adapter rather than booting a server. No live Openfire installation, browser
+session, database, or federated XMPP pair was exercised in this workspace.
+
+Before production use, perform live local/federated routing and Admin Console
+smoke tests, including plugin reload, startup failure recovery, and actual server
+classloader behavior. Browser rendering/escaping is reviewed in the JSP but is
+not exercised by a browser automation test. CI workflow execution and Java 22
+runtime behavior are configured for CI, not claimed as locally executed.
+
+## Deferred features
+
+Per-user and per-room clearances; MUC history and recipient filtering; label
+catalogues; discovery beyond the base feature; cross-policy translation;
+recursive forwarded-message handling; cluster configuration distribution; and
+live configuration reload from external file edits. Do not describe this
+increment as complete XEP-0258 support.
