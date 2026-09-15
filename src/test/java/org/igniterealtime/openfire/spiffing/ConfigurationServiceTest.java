@@ -105,7 +105,8 @@ class ConfigurationServiceTest {
         var service = new ConfigurationService(store);
         service.reload();
         var before = service.current();
-        try (var executor = Executors.newSingleThreadExecutor()) {
+        var executor = Executors.newSingleThreadExecutor();
+        try {
             var saved = executor.submit(() -> service.save(Fixtures.settings(LabelFormat.XML)));
             try {
                 assertTrue(started.await(5, TimeUnit.SECONDS));
@@ -114,6 +115,8 @@ class ConfigurationServiceTest {
             } finally { release.countDown(); }
             saved.get(5, TimeUnit.SECONDS);
             assertEquals(LabelFormat.XML, service.current().settings().outputFormat());
+        } finally {
+            executor.shutdown();
         }
     }
 }

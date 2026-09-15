@@ -39,7 +39,7 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
             if (labels.isEmpty()) {
                 message.getElement().add(snapshot.defaultEnvelope());
             } else {
-                Element original = labels.getFirst();
+                Element original = labels.get(0);
                 Element checked = snapshot.check(original);
                 if (checked != original) {
                     original.detach();

@@ -178,9 +178,13 @@ Message bodies and full policy/clearance documents are not logged on rejection.
 
 Target Openfire 5.0.0 APIs and Java 17 bytecode, matching Spiffing's minimum runtime.
 Spiffing dropped its baseline from Java 22 to Java 17; this plugin's build property,
-plugin descriptor, CI matrix, and documentation were updated to match. No plugin
-source relies on syntax newer than Java 17. The plugin descriptor declares both
-minimum versions. The plugin depends on
+plugin descriptor, CI matrix, and documentation were updated to match. The plugin
+source and tests previously used a few Java 21+ conveniences
+(`List.getFirst()`/`getLast()`, and one `ExecutorService` try-with-resources,
+which requires Java 19's `AutoCloseable` support); these were rewritten with
+`get(0)`/index-based access and an explicit `shutdown()` so the actual
+Java 17 build (not just a syntax scan) compiles and passes. The plugin
+descriptor declares both minimum versions. The plugin depends on
 `io.cridland:spiffing:1.0-SNAPSHOT`; CI checks out and installs Spiffing commit
 `60c474434fc57f9a1ecab7e9549773f3a6656614`. Tests copy MIT-licensed Food policy
 fixtures so the test runtime does not depend on the sibling checkout.
@@ -221,11 +225,20 @@ The file-store tests use a temporary directory; lifecycle tests inject an Openfi
 adapter rather than booting a server. No live Openfire installation, browser
 session, database, or federated XMPP pair was exercised in this workspace.
 
+Once the sibling `../spiffing-java` checkout was updated to build cleanly on
+Java 17, a full local `mvn verify` running javac under `--release 17` (Temurin
+17.0.20) was executed end to end: all 79 tests passed, the Admin Console JSP
+compiled, and the plugin assembly jar was built. This superseded an earlier,
+incomplete verification that only syntax-scanned the plugin's own sources with
+`javac --release 17` while skipping test compilation; that scan had missed the
+Java 19+/21+ APIs described above, which only surfaced once the dependency
+actually built and the full module (including tests) was compiled.
+
 Before production use, perform live local/federated routing and Admin Console
 smoke tests, including plugin reload, startup failure recovery, and actual server
 classloader behavior. Browser rendering/escaping is reviewed in the JSP but is
-not exercised by a browser automation test. CI workflow execution and Java 17
-runtime behavior are configured for CI, not claimed as locally executed.
+not exercised by a browser automation test. CI workflow execution on Java 17 is
+configured for CI, not separately exercised there in this session.
 
 ## Deferred features
 

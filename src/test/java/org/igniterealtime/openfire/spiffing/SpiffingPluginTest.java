@@ -27,7 +27,7 @@ class SpiffingPluginTest {
         assertEquals(1, runtime.interceptors.size());
         assertTrue(runtime.feature);
         assertFalse(plugin.isConfigured());
-        var interceptor = runtime.interceptors.getFirst();
+        var interceptor = runtime.interceptors.get(0);
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(new Message(), null, true, false));
         plugin.save(Fixtures.settings());
         assertTrue(plugin.isConfigured());
@@ -51,7 +51,7 @@ class SpiffingPluginTest {
         plugin.initializePlugin(null, null);
         assertFalse(plugin.isConfigured());
         assertEquals(1, runtime.interceptors.size());
-        assertThrows(PacketRejectedException.class, () -> runtime.interceptors.getFirst().interceptPacket(new Message(), null, true, false));
+        assertThrows(PacketRejectedException.class, () -> runtime.interceptors.get(0).interceptPacket(new Message(), null, true, false));
         plugin.save(Fixtures.settings());
         assertTrue(plugin.isConfigured());
         plugin.destroyPlugin();

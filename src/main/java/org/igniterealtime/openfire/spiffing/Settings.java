@@ -39,9 +39,9 @@ public record Settings(String policy, String clearance, LabelFormat clearanceFor
 
     private static Element single(Element root, String name) {
         var matches = root.elements(org.dom4j.QName.get(name));
-        if (matches.size() != 1 || !matches.getFirst().elements().isEmpty()) {
+        if (matches.size() != 1 || !matches.get(0).elements().isEmpty()) {
             throw new IllegalArgumentException("Invalid settings field.");
         }
-        return matches.getFirst();
+        return matches.get(0);
     }
 }

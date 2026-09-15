@@ -48,7 +48,7 @@ class SecurityLabelInterceptorTest {
         message.getElement().element(PolicyConfiguration.ENVELOPE).detach();
         message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.ESS));
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, session, true, false));
-        assertEquals(message.getFrom(), replies.getFirst().getTo());
+        assertEquals(message.getFrom(), replies.get(0).getTo());
     }
 
     @Test void retainsExistingAuthorizedEnvelopeAndOtherExtensions() throws Exception {
@@ -71,7 +71,7 @@ class SecurityLabelInterceptorTest {
         assertNull(rejection.getRejectionMessage());
         assertEquals(before, message.toXML());
         assertEquals(1, replies.size());
-        var reply = replies.getFirst();
+        var reply = replies.get(0);
         assertEquals(message.getID(), reply.getID());
         assertEquals(message.getFrom(), reply.getTo());
         assertEquals(message.getTo(), reply.getFrom());
@@ -130,7 +130,7 @@ class SecurityLabelInterceptorTest {
         var message = message();
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, null, true, false));
         assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
-        assertEquals(PacketError.Condition.service_unavailable, replies.getFirst().getError().getCondition());
+        assertEquals(PacketError.Condition.service_unavailable, replies.get(0).getError().getCondition());
     }
 
     @Test void errorsBypassAuthorizationEvenWhenUnconfigured() throws Exception {

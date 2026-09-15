@@ -45,7 +45,7 @@ public final class PolicyConfiguration {
             authorize(defaultLabel);
             defaultEnvelope = encode(defaultLabel, settings.outputFormat());
             // Serialization must not change the access decision or label semantics.
-            Label roundTrip = payload(defaultEnvelope.element(QName.get("label", NAMESPACE)).elements().getFirst());
+            Label roundTrip = payload(defaultEnvelope.element(QName.get("label", NAMESPACE)).elements().get(0));
             authorize(roundTrip);
             if (!equivalent(defaultLabel, roundTrip)) throw new IllegalArgumentException();
         } catch (RuntimeException e) {
@@ -63,8 +63,8 @@ public final class PolicyConfiguration {
         if (!ENVELOPE.equals(envelope.getQName()) || !envelope.getTextTrim().isEmpty()) throw malformed();
         List<Element> children = envelope.elements();
         int index = 0;
-        if (!children.isEmpty() && named(children.getFirst(), "displaymarking")) {
-            if (!children.getFirst().elements().isEmpty()) throw malformed();
+        if (!children.isEmpty() && named(children.get(0), "displaymarking")) {
+            if (!children.get(0).elements().isEmpty()) throw malformed();
             index++;
         }
         if (index >= children.size() || !named(children.get(index), "label")) throw malformed();
@@ -90,7 +90,7 @@ public final class PolicyConfiguration {
             if (allowEmpty) return null;
             throw malformed();
         }
-        return payload(holder.elements().getFirst());
+        return payload(holder.elements().get(0));
     }
 
     private Label payload(Element payload) {

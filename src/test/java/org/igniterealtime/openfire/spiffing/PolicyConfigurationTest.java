@@ -25,7 +25,7 @@ class PolicyConfigurationTest {
             case NATO -> PolicyConfiguration.NATO_NAMESPACE;
             case XML -> PolicyConfiguration.XML_NAMESPACE;
         };
-        assertEquals(expectedNamespace, envelope.element(QName.get("label", PolicyConfiguration.NAMESPACE)).elements().getFirst().getNamespaceURI());
+        assertEquals(expectedNamespace, envelope.element(QName.get("label", PolicyConfiguration.NAMESPACE)).elements().get(0).getNamespaceURI());
         envelope.clearContent();
         assertFalse(configuration.defaultEnvelope().elements().isEmpty(), "stanzas cannot mutate the configured template");
     }
@@ -97,7 +97,7 @@ class PolicyConfigurationTest {
     @Test void displayMarkingCannotGrantAccess() {
         var config = new PolicyConfiguration(Fixtures.settings());
         var envelope = Fixtures.envelope("food-label-water", LabelFormat.XML);
-        var holder = envelope.elements().getFirst();
+        var holder = envelope.elements().get(0);
         holder.detach();
         envelope.add(Fixtures.xml("<displaymarking xmlns='urn:xmpp:sec-label:0'>ALLOWED</displaymarking>"));
         envelope.add(holder);
@@ -121,7 +121,7 @@ class PolicyConfigurationTest {
     @Test void permitsEquivalentEncodingOfSamePolicyLabel() {
         var config = new PolicyConfiguration(Fixtures.settings());
         var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.ESS);
-        var equivalent = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML).elements().getFirst();
+        var equivalent = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML).elements().get(0);
         equivalent.detach();
         equivalent.setQName(QName.get("equivalentlabel", PolicyConfiguration.NAMESPACE));
         envelope.add(equivalent);
@@ -131,9 +131,10 @@ class PolicyConfigurationTest {
     @Test void rejectsUnknownPolicyAndFalseEquivalence() {
         var config = new PolicyConfiguration(Fixtures.settings());
         var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
-        var equivalent = envelope.elements().getFirst().createCopy();
+        var equivalent = envelope.elements().get(0).createCopy();
         equivalent.setQName(QName.get("equivalentlabel", PolicyConfiguration.NAMESPACE));
-        equivalent.elements().getFirst().elements().getLast().detach(); // remove permissive category; still a valid permitted label, but not equivalent
+        var equivalentCategories = equivalent.elements().get(0).elements();
+        equivalentCategories.get(equivalentCategories.size() - 1).detach(); // remove permissive category; still a valid permitted label, but not equivalent
         envelope.add(equivalent);
         assertThrows(RuntimeException.class, () -> config.check(envelope));
         var foreign = Fixtures.xml(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML).asXML().replace("1.2.826.0.1.6726289.0.0\"", "1.2.3.4\""));
@@ -143,7 +144,7 @@ class PolicyConfigurationTest {
     @Test void acceptsXmlWhitespaceButNotMimeGarbageInBase64() {
         var config = new PolicyConfiguration(Fixtures.settings());
         var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.ESS);
-        var payload = envelope.elements().getFirst().elements().getFirst();
+        var payload = envelope.elements().get(0).elements().get(0);
         payload.setText(" \n\t" + payload.getText() + "\r\n");
         assertDoesNotThrow(() -> config.check(envelope));
         payload.setText(payload.getText() + "!");
@@ -156,7 +157,7 @@ class PolicyConfigurationTest {
         envelope.addAttribute("padding", "x".repeat(SecureXml.MAX_LABEL));
         assertThrows(RuntimeException.class, () -> config.check(envelope));
         var deep = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/></securitylabel>");
-        var cursor = deep.elements().getFirst();
+        var cursor = deep.elements().get(0);
         for (int i = 0; i < 40; i++) cursor = cursor.addElement("nested");
         assertThrows(RuntimeException.class, () -> config.check(deep));
     }
