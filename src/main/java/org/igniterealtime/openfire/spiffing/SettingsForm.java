@@ -16,8 +16,12 @@ public final class SettingsForm {
         }
         Settings settings;
         try {
+            // Missing field (e.g. a form saved before this switch existed) defaults to the safe "warn" mode.
+            String enforcement = fields.get("enforcementMode");
+            EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
             settings = new Settings(fields.get("policy"), fields.get("clearance"), LabelFormat.valueOf(fields.get("clearanceFormat")),
-                fields.get("label"), LabelFormat.valueOf(fields.get("labelFormat")), LabelFormat.valueOf(fields.get("outputFormat")));
+                fields.get("label"), LabelFormat.valueOf(fields.get("labelFormat")), LabelFormat.valueOf(fields.get("outputFormat")),
+                enforcementMode);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Provide all documents and select valid formats.");
         }

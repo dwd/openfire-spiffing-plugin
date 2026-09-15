@@ -4,6 +4,8 @@ import org.dom4j.Element;
 import org.jivesoftware.openfire.interceptor.PacketInterceptor;
 import org.jivesoftware.openfire.interceptor.PacketRejectedException;
 import org.jivesoftware.openfire.session.Session;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.xmpp.packet.Message;
 import org.xmpp.packet.Packet;
 import org.xmpp.packet.PacketError;
@@ -12,6 +14,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 public final class SecurityLabelInterceptor implements PacketInterceptor {
+    private static final Logger LOG = LoggerFactory.getLogger(SecurityLabelInterceptor.class);
     private final Supplier<PolicyConfiguration> configuration;
     private final Consumer<Message> reply;
 
@@ -47,7 +50,13 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
                 }
             }
         } catch (RuntimeException e) {
-            reject(message, PacketError.Condition.forbidden);
+            if (snapshot.settings().enforcementMode() == EnforcementMode.ENFORCE) {
+                reject(message, PacketError.Condition.forbidden);
+            } else {
+                // Warn mode: log without the message body/label content and let the message through unchanged.
+                LOG.warn("Security label check failed for message from {} to {} (id {}): {}. Enforcement mode is warn, so the message was allowed through.",
+                    message.getFrom(), message.getTo(), message.getID(), e.getMessage());
+            }
         }
     }
 

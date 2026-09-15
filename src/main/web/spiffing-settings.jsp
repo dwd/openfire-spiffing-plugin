@@ -5,6 +5,7 @@
             org.igniterealtime.openfire.spiffing.SettingsForm,
             java.util.HashMap,
             org.igniterealtime.openfire.spiffing.LabelFormat,
+            org.igniterealtime.openfire.spiffing.EnforcementMode,
             org.jivesoftware.util.CookieUtils,
             org.jivesoftware.util.StringUtils" %>
 <%@ taglib uri="admin" prefix="admin" %>
@@ -19,6 +20,7 @@
     String clearanceFormat = saved == null ? "XML" : saved.clearanceFormat().name();
     String labelFormat = saved == null ? "XML" : saved.labelFormat().name();
     String outputFormat = saved == null ? "ESS" : saved.outputFormat().name();
+    String enforcementMode = saved == null ? EnforcementMode.WARN.name() : saved.enforcementMode().name();
     String error = null;
     if ("POST".equals(request.getMethod())) {
         final Cookie csrfCookie = CookieUtils.getCookie(request, "csrf");
@@ -32,6 +34,7 @@
             clearanceFormat = request.getParameter("clearanceFormat");
             labelFormat = request.getParameter("labelFormat");
             outputFormat = request.getParameter("outputFormat");
+            enforcementMode = request.getParameter("enforcementMode");
             try {
                 final HashMap<String, String> fields = new HashMap<>();
                 fields.put("policy", policy);
@@ -40,6 +43,7 @@
                 fields.put("clearanceFormat", clearanceFormat);
                 fields.put("labelFormat", labelFormat);
                 fields.put("outputFormat", outputFormat);
+                fields.put("enforcementMode", enforcementMode);
                 SettingsForm.save(request.getMethod(), csrfCookie.getValue(), csrfParam, fields, plugin::save);
                 response.sendRedirect("spiffing-settings.jsp?saved=true");
                 return;
@@ -61,7 +65,9 @@
     pageContext.setAttribute("clearanceFormat", clearanceFormat);
     pageContext.setAttribute("labelFormat", labelFormat);
     pageContext.setAttribute("outputFormat", outputFormat);
+    pageContext.setAttribute("enforcementMode", enforcementMode);
     pageContext.setAttribute("formats", LabelFormat.values());
+    pageContext.setAttribute("enforcementModes", EnforcementMode.values());
 %>
 <html>
 <head><title>Spiffing security labels</title><meta name="pageID" content="spiffing-settings"/></head>
@@ -72,6 +78,12 @@
     <c:when test="${configured}"><p>Inbound messages are checked against the server clearance. Unlabelled messages receive the default label.</p></c:when>
     <c:otherwise><admin:infoBox type="warning">Inbound messages are blocked until a valid configuration is saved.</admin:infoBox></c:otherwise>
 </c:choose>
+<c:if test="${configured}">
+    <c:choose>
+        <c:when test="${enforcementMode eq 'ENFORCE'}"><p>Enforcement mode: messages that fail the label check are rejected.</p></c:when>
+        <c:otherwise><admin:infoBox type="info">Warn mode: messages that fail the label check are logged and let through unchanged.</admin:infoBox></c:otherwise>
+    </c:choose>
+</c:if>
 <p>Provide an Open XML SPIF policy, a server clearance, and a default label belonging to that policy.
     XML means Spiffy XML; NATO means NATO XML; ESS means base64-encoded ASN.1 (an RFC 5912 clearance or ESS label).
     Paste the label payload itself, without the XEP-0258 envelope. All fields are required.</p>
@@ -99,6 +111,13 @@
                 <c:forEach var="format" items="${formats}"><option value="${format}" ${format eq outputFormat ? 'selected' : ''}>${format}</option></c:forEach>
             </select></p>
         <p>The default label must pass both policy validation and the server clearance check before these settings can be saved.</p>
+    </admin:contentBox>
+    <admin:contentBox title="Enforcement">
+        <p><label for="enforcementMode">On a failed label check</label>
+            <select id="enforcementMode" name="enforcementMode">
+                <c:forEach var="mode" items="${enforcementModes}"><option value="${mode}" ${mode eq enforcementMode ? 'selected' : ''}>${mode}</option></c:forEach>
+            </select></p>
+        <p>Warn logs the failure and lets the message through unchanged. Enforce rejects the message with an error. Warn is the safe default for staged rollout.</p>
     </admin:contentBox>
     <input type="submit" value="Save settings"/>
 </form>

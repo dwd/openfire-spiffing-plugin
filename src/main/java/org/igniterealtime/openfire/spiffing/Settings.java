@@ -6,7 +6,8 @@ import java.util.Objects;
 
 /** All settings are persisted together, so readers never see a partial policy update. */
 public record Settings(String policy, String clearance, LabelFormat clearanceFormat,
-                       String defaultLabel, LabelFormat labelFormat, LabelFormat outputFormat) {
+                       String defaultLabel, LabelFormat labelFormat, LabelFormat outputFormat,
+                       EnforcementMode enforcementMode) {
     public Settings {
         SecureXml.bounded(policy, SecureXml.MAX_DOCUMENT);
         SecureXml.bounded(clearance, SecureXml.MAX_LABEL);
@@ -14,11 +15,19 @@ public record Settings(String policy, String clearance, LabelFormat clearanceFor
         Objects.requireNonNull(clearanceFormat);
         Objects.requireNonNull(labelFormat);
         Objects.requireNonNull(outputFormat);
+        Objects.requireNonNull(enforcementMode);
+    }
+
+    /** Convenience constructor for existing call sites; defaults to the safe "warn" enforcement mode. */
+    public Settings(String policy, String clearance, LabelFormat clearanceFormat,
+                     String defaultLabel, LabelFormat labelFormat, LabelFormat outputFormat) {
+        this(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, EnforcementMode.WARN);
     }
 
     public String toXml() {
         Element root = DocumentHelper.createElement("spiffing-settings");
         root.addAttribute("version", "1");
+        root.addAttribute("enforcement", enforcementMode.name());
         root.addElement("policy").setText(policy);
         root.addElement("clearance").addAttribute("format", clearanceFormat.name()).setText(clearance);
         root.addElement("default-label").addAttribute("format", labelFormat.name())
@@ -33,8 +42,12 @@ public record Settings(String policy, String clearance, LabelFormat clearanceFor
             throw new IllegalArgumentException("Unsupported settings document.");
         }
         Element policy = single(root, "policy"), clearance = single(root, "clearance"), label = single(root, "default-label");
+        // Documents saved before this switch existed have no "enforcement" attribute; default to the safe "warn" mode.
+        String enforcement = root.attributeValue("enforcement");
+        EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
         return new Settings(policy.getText(), clearance.getText(), LabelFormat.valueOf(clearance.attributeValue("format")),
-            label.getText(), LabelFormat.valueOf(label.attributeValue("format")), LabelFormat.valueOf(label.attributeValue("output")));
+            label.getText(), LabelFormat.valueOf(label.attributeValue("format")), LabelFormat.valueOf(label.attributeValue("output")),
+            enforcementMode);
     }
 
     private static Element single(Element root, String name) {

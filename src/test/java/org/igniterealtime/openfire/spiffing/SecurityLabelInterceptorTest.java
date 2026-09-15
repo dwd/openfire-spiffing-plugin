@@ -89,6 +89,29 @@ class SecurityLabelInterceptorTest {
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, null, true, false));
     }
 
+    @Test void warnModeLogsAndAllowsDeniedMessageThroughUnchanged() throws Exception {
+        var warnConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN));
+        var warnInterceptor = new SecurityLabelInterceptor(() -> warnConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.ESS));
+        String before = message.toXML();
+        warnInterceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void warnModeLogsAndAllowsDuplicateEnvelopesThrough() throws Exception {
+        var warnConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN));
+        var warnInterceptor = new SecurityLabelInterceptor(() -> warnConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(warnConfiguration.defaultEnvelope());
+        message.getElement().add(warnConfiguration.defaultEnvelope());
+        String before = message.toXML();
+        warnInterceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
     @Test void explicitDefaultIsStamped() throws Exception {
         var message = message();
         message.getElement().add(Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/></securitylabel>"));

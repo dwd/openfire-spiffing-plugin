@@ -21,8 +21,22 @@ class ConfigurationServiceTest {
 
     @Test void settingsRoundTripEscapedXmlAndUnicode() {
         Settings s = Fixtures.settings();
-        var input = new Settings(s.policy() + "<!-- <& café -->", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat());
+        var input = new Settings(s.policy() + "<!-- <& café -->", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
         assertEquals(input, Settings.fromXml(input.toXml()));
+    }
+
+    @Test void enforcementModeRoundTripsThroughXml() {
+        var enforce = Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE);
+        assertEquals(EnforcementMode.ENFORCE, Settings.fromXml(enforce.toXml()).enforcementMode());
+        var warn = Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN);
+        assertEquals(EnforcementMode.WARN, Settings.fromXml(warn.toXml()).enforcementMode());
+    }
+
+    @Test void documentSavedBeforeEnforcementSwitchExistedDefaultsToWarn() {
+        Settings s = Fixtures.settings();
+        // Simulate a pre-existing on-disk document that predates the "enforcement" attribute.
+        String legacy = s.toXml().replaceFirst(" enforcement=[\"'][A-Z]+[\"']", "");
+        assertEquals(EnforcementMode.WARN, Settings.fromXml(legacy).enforcementMode());
     }
 
     @Test void savesAndLoadsValidatedConfigurationAsOneProperty() {

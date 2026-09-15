@@ -21,7 +21,16 @@ class SettingsFormTest {
     @Test void validSubmissionIsSaved() {
         List<Settings> saved = new ArrayList<>();
         SettingsForm.save("POST", "token", "token", fields(), saved::add);
-        assertEquals(List.of(Fixtures.settings()), saved);
+        // The "enforcementMode" field is absent, as in a form saved before this switch existed; it defaults to "warn".
+        assertEquals(List.of(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN)), saved);
+    }
+
+    @Test void explicitEnforcementModeIsSaved() {
+        List<Settings> saved = new ArrayList<>();
+        var withMode = fields();
+        withMode.put("enforcementMode", "ENFORCE");
+        SettingsForm.save("POST", "token", "token", withMode, saved::add);
+        assertEquals(List.of(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE)), saved);
     }
 
     @Test void missingOrInvalidFieldsCannotSave() {
@@ -33,6 +42,9 @@ class SettingsFormTest {
         var invalid = fields();
         invalid.put("outputFormat", "ANY");
         assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", invalid, s -> fail("must not save")));
+        var invalidMode = fields();
+        invalidMode.put("enforcementMode", "ANY");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", invalidMode, s -> fail("must not save")));
     }
 
     @Test void formUsesPolicyValidationBeforePersistence() {

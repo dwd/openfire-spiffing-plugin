@@ -14,9 +14,12 @@ final class Fixtures {
 
     static Settings settings() { return settings(LabelFormat.ESS); }
 
-    static Settings settings(LabelFormat output) {
+    // Tests default to "enforce" so pre-existing rejection assertions keep testing rejection.
+    static Settings settings(LabelFormat output) { return settings(output, EnforcementMode.ENFORCE); }
+
+    static Settings settings(LabelFormat output, EnforcementMode enforcementMode) {
         return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
-            read("food-label-milk-chocolate"), LabelFormat.XML, output);
+            read("food-label-milk-chocolate"), LabelFormat.XML, output, enforcementMode);
     }
 
     static Element envelope(String fixture, LabelFormat format) {

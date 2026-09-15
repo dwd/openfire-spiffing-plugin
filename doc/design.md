@@ -1,6 +1,7 @@
 # XEP-0258 plugin design
 
 Status: first server-enforcement increment implemented, September 9, 2026.
+An enforcement-mode switch (warn/enforce) was added September 15, 2026.
 
 ## Objective and confirmed requirements
 
@@ -88,7 +89,8 @@ Outbound, postprocessing, IQ, and presence callbacks are outside this increment.
    envelope with the generated default after validating any equivalents.
 5. Validate the effective label under the configured policy and test access using
    the server clearance. A malformed, unsupported, policy-invalid, or denied
-   label is rejected with a generic `forbidden` error. Permitted existing labels
+   label is rejected with a generic `forbidden` error, unless the configured
+   enforcement mode is "warn" (see below). Permitted existing labels
    and unrelated extensions remain unchanged.
 
 Label selection is namespace-aware. A same-named element in another namespace
@@ -100,6 +102,35 @@ All non-error message types are subject to server enforcement, including chat
 state/receipt messages and groupchat subject messages. This deliberately follows
 the requested all-inbound-message scope; XEP-0258's recommendation to exempt MUC
 subject-only changes can be considered with future room-specific handling.
+
+## Enforcement mode: warn vs. enforce
+
+`EnforcementMode` (`WARN` or `ENFORCE`) is part of `Settings`, saved and
+validated together with the rest of the configuration, and selectable in the
+Admin Console. It defaults to `WARN`. This only governs step 5 above (a
+malformed, unsupported, policy-invalid, or denied label on a message that
+already has a configuration to check against):
+
+- `ENFORCE` rejects the message exactly as in the initial increment: a
+  sanitized `forbidden` error reply, then `PacketRejectedException`.
+- `WARN` logs a single-line warning (sender, recipient, stanza ID, and the
+  generic validation failure reason, but never the message body, thread, or
+  label payload, consistent with the existing rejection-logging rule) and lets
+  the message continue unmodified, exactly as it arrived. No reply is sent and
+  no default label is stamped over an existing, uncheckable envelope.
+
+Missing configuration (no snapshot published yet, or a failed startup load)
+still unconditionally blocks ordinary messages with `service-unavailable`.
+There is no saved `EnforcementMode` to consult in that state, and defaulting
+to open failure would contradict the fail-closed startup behavior documented
+above; `WARN` only relaxes the outcome of an actual label check against a
+valid, active configuration.
+
+`WARN` is the safe default so administrators can roll out a new or changed
+policy and observe real traffic against it before switching to `ENFORCE`.
+Settings documents saved before this switch existed have no `enforcement`
+attribute; `Settings.fromXml` treats that as `WARN`, matching the new default
+and never silently upgrading an existing deployment to rejection behavior.
 
 ## Label envelope and policy semantics
 
@@ -215,9 +246,18 @@ message objects. Coverage includes:
   storage failures, startup recovery, concurrent snapshot reads, actual atomic
   file replacement and cleanup, CSRF/method/missing-field rejection, and plugin
   registration/removal/discovery lifecycle.
+- Warn-vs-enforce behavior: a denied/malformed label is logged and passed through
+  unchanged in warn mode versus rejected in enforce mode, enforcement-mode XML
+  round-tripping, the Admin Console form field, and defaulting to warn both for a
+  brand-new configuration and for a settings document saved before this switch
+  existed (no `enforcement` attribute on disk).
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
+After adding the enforcement-mode switch, `mvn verify` was re-run in this session
+against the project's configured Bouncy Castle 1.78.1: **84 tests passed**, with
+no failures or skips, the Admin Console JSP compiled, and the plugin assembly jar
+was built. The 1.84 compatibility variant was not re-run in this session.
 
 `mvn verify` compiles the Admin Console JSP, runs the suite, and builds the plugin
 archive. Archive inspection checks generated servlet mappings and bundled JARs.
