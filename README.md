@@ -8,6 +8,10 @@ Settings → Spiffing security labels**. Saving checks both policy validity and
 clearance authorization of the default. Inbound messages are checked before
 routing; unlabelled messages are stamped with that default.
 
+Administrators can also curate a named label catalogue in **Server → Server
+Settings → Spiffing label catalogue**, answering XEP-0258 catalogue discovery
+(`urn:xmpp:sec-label:catalog:2`) for local clients.
+
 Requires **Openfire 5.0.0 or later running Java 17 or later**. The Java requirement
 comes from Spiffing. This is the first server enforcement increment, not a full
 implementation of every XEP-0258 feature.
@@ -29,7 +33,9 @@ checkout is required after installing the dependency.
 Install `target/spiffing-openfire-plugin-assembly.jar` using Openfire's plugin
 upload page. The archive contains the plugin and Spiffing. Bouncy Castle is supplied by Openfire.
 **Once installed, ordinary inbound messages are blocked until valid settings are
-saved.** No sample policy or clearance is activated automatically.
+saved.** No sample policy or clearance is activated automatically. On first
+install, Openfire creates the `ofSpiffingCatalog` database table from
+`src/main/database/spiffing_*.sql` for the label catalogue.
 
 ## Configuration
 
@@ -69,7 +75,20 @@ Configuration is per node; automatic cluster distribution is not implemented.
   messages containing a direct XEP-0258 label are discarded without a reply.
 - Only the outer message's direct label authorizes that message. Forwarded inner
   messages are not recursively authorized. Per-user/per-room clearances, history
-  filtering, label catalogues, and cross-policy translation are outside this increment.
+  filtering, and cross-policy translation are outside this increment.
+
+## Label catalogue
+
+- Catalogue entries (name, optional selector, format, and label) are added and
+  removed in the Admin Console and stored in the Openfire database.
+- `<catalog/>` IQ requests (`urn:xmpp:sec-label:catalog:2`) are answered only for
+  local clients; remote/federated requests are rejected with `not-authorized`.
+- Each entry is validated against the active policy and clearance both when
+  added and again whenever the catalogue is requested; an entry that no longer
+  validates after a policy/clearance change is silently omitted rather than
+  failing the whole catalogue.
+- At most one entry can be flagged as the catalogue's default item, independent
+  from the message-stamping default label configured on the settings page.
 
 See [the design document](doc/design.md) for decisions, tests, and remaining
 integration work.

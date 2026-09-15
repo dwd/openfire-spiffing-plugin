@@ -2,6 +2,8 @@
 
 Status: first server-enforcement increment implemented, September 9, 2026.
 An enforcement-mode switch (warn/enforce) was added September 15, 2026.
+Label catalogue discovery (add/list/remove in the Admin Console) was added
+September 15, 2026.
 
 ## Objective and confirmed requirements
 
@@ -280,10 +282,69 @@ classloader behavior. Browser rendering/escaping is reviewed in the JSP but is
 not exercised by a browser automation test. CI workflow execution on Java 17 is
 configured for CI, not separately exercised there in this session.
 
+## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
+
+The catalogue is a separate, administrator-curated list of named security labels
+offered to clients for selection, independent from the single message-stamping
+default label in `Settings`/`PolicyConfiguration`. Design decisions, confirmed
+with the user before implementation:
+
+- **Storage**: catalogue entries are persisted in the Openfire database, in a
+  new `ofSpiffingCatalog` table (schema in `src/main/database/spiffing_*.sql`,
+  registered via `plugin.xml`'s `<databaseKey>`/`<databaseVersion>`), not in the
+  file-based `spiffing.xml` used for policy/clearance/default-label settings.
+  This keeps the catalogue's own lifecycle (frequent, independent add/remove)
+  separate from the atomic-file settings document, and matches how Openfire
+  plugins normally store lists of records. `DatabaseCatalogStore` implements the
+  `CatalogStore` interface using `DbConnectionManager`, mirroring the JDBC
+  patterns used elsewhere in Openfire.
+- **Access control**: only requests from local entities are served (checked via
+  `XMPPServer.isLocal(from)` through an injected predicate); federated/remote
+  catalogue requests receive `not-authorized`. This is stricter than the base
+  XEP-0258 recommendation ("any entity") but matches the user's explicit choice
+  for this deployment; it can be relaxed later if federated catalogue sharing is
+  required.
+- **Entry content**: each entry has a name, an optional XEP-0258 `selector`
+  (validated as a `|`-separated non-empty path), a `LabelFormat` (ESS, NATO XML,
+  or Spiffy XML, reusing the existing enum), and its own label payload. The
+  payload is independently validated against the currently active policy and
+  clearance via `PolicyConfiguration.encodeCatalogLabel`, exactly like the
+  default label, rather than only referencing already-known labels.
+- **Default flag**: exactly one entry may be flagged as the catalogue's
+  `<item default="true"/>` (`CatalogEntry.isDefault`). Adding a new default
+  entry clears the flag on any previous default (`CatalogStore.clearDefault`)
+  before inserting; clearing and inserting are two separate statements, not one
+  transaction, so a crash between them can leave zero default entries (see
+  `DatabaseCatalogStore`'s Javadoc). This flag is unrelated to the
+  message-stamping default label configured on the settings page.
+
+Components: `CatalogEntry` (validated record), `CatalogStore`/
+`DatabaseCatalogStore` (persistence), `CatalogService` (validation against the
+active `PolicyConfiguration`, default-entry exclusivity, and `<catalog/>`
+element construction), `CatalogIqHandler` (answers `get` IQs in the
+`urn:xmpp:sec-label:catalog:2` namespace, registered with Openfire's
+`IQRouter`), and `CatalogForm` (CSRF/field validation for the Admin Console,
+mirroring `SettingsForm`). `SpiffingPlugin` registers the IQ handler and
+advertises the `urn:xmpp:sec-label:catalog:2` disco feature alongside the
+existing `urn:xmpp:sec-label:0` feature, and unregisters both on destroy.
+
+A policy/clearance change can leave a previously valid catalogue entry unable
+to authorize. `CatalogService.buildCatalog` fails safe per entry: an entry that
+no longer validates is omitted from the published catalogue (and logged), while
+the rest of the catalogue and the plugin's message enforcement are unaffected.
+If no configuration is active at all, the whole catalogue request is rejected
+with `service-unavailable`, consistent with the message-enforcement fail-closed
+behavior.
+
+The Admin Console page `spiffing-catalog.jsp` lists current entries (name,
+selector, format, default flag) with a per-row remove action, and a form to add
+a new entry. It follows the same CSRF-cookie pattern, generic error reporting,
+and escaped redisplay as `spiffing-settings.jsp`.
+
 ## Deferred features
 
-Per-user and per-room clearances; MUC history and recipient filtering; label
-catalogues; discovery beyond the base feature; cross-policy translation;
-recursive forwarded-message handling; cluster configuration distribution; and
-live configuration reload from external file edits. Do not describe this
-increment as complete XEP-0258 support.
+Per-user and per-room clearances; MUC history and recipient filtering; catalogue
+discovery for remote/federated entities; cross-policy translation; recursive
+forwarded-message handling; cluster configuration distribution; and live
+configuration reload from external file edits. Do not describe this increment
+as complete XEP-0258 support.

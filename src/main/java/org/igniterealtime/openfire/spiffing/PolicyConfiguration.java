@@ -57,6 +57,22 @@ public final class PolicyConfiguration {
 
     public Element defaultEnvelope() { return defaultEnvelope.createCopy(); }
 
+    /**
+     * Validates an arbitrary label payload against this policy and clearance and encodes it as a
+     * XEP-0258 envelope, exactly like the default label. Used for label catalogue entries, which are
+     * independent of the configured default.
+     */
+    public Element encodeCatalogLabel(String payload, LabelFormat format) {
+        Label label;
+        try {
+            label = site.label(format.decode(payload), format.format);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("The label is not valid input for the selected format.");
+        }
+        authorize(label);
+        return encode(label, format);
+    }
+
     /** Returns a stamped copy for an empty primary label; otherwise retains the original envelope. */
     Element check(Element envelope) {
         boundTree(envelope);

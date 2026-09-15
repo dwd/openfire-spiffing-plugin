@@ -14,6 +14,10 @@
     <minServerVersion>5.0.0</minServerVersion>
     <minJavaVersion>17</minJavaVersion>
 
+    <!-- Database schema for the label catalogue (src/main/database/spiffing_*.sql) -->
+    <databaseKey>spiffing</databaseKey>
+    <databaseVersion>1</databaseVersion>
+
     <!-- Admin console entries -->
     <adminconsole>
         <tab id="tab-server">
@@ -22,6 +26,10 @@
                       name="Spiffing security labels"
                       url="spiffing-settings.jsp"
                       description="Server security policy, clearance and default message label"/>
+                <item id="spiffing-catalog"
+                      name="Spiffing label catalogue"
+                      url="spiffing-catalog.jsp"
+                      description="Named security labels offered to clients via XEP-0258 catalogue discovery"/>
             </sidebar>
         </tab>
     </adminconsole>
