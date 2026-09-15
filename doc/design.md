@@ -176,8 +176,11 @@ Message bodies and full policy/clearance documents are not logged on rejection.
 
 ## Build and dependency compatibility
 
-Target Openfire 5.0.0 APIs and Java 22 bytecode, matching Spiffing's minimum runtime.
-The plugin descriptor declares both minimum versions. The plugin depends on
+Target Openfire 5.0.0 APIs and Java 17 bytecode, matching Spiffing's minimum runtime.
+Spiffing dropped its baseline from Java 22 to Java 17; this plugin's build property,
+plugin descriptor, CI matrix, and documentation were updated to match. No plugin
+source relies on syntax newer than Java 17. The plugin descriptor declares both
+minimum versions. The plugin depends on
 `io.cridland:spiffing:1.0-SNAPSHOT`; CI checks out and installs Spiffing commit
 `60c474434fc57f9a1ecab7e9549773f3a6656614`. Tests copy MIT-licensed Food policy
 fixtures so the test runtime does not depend on the sibling checkout.
@@ -221,7 +224,7 @@ session, database, or federated XMPP pair was exercised in this workspace.
 Before production use, perform live local/federated routing and Admin Console
 smoke tests, including plugin reload, startup failure recovery, and actual server
 classloader behavior. Browser rendering/escaping is reviewed in the JSP but is
-not exercised by a browser automation test. CI workflow execution and Java 22
+not exercised by a browser automation test. CI workflow execution and Java 17
 runtime behavior are configured for CI, not claimed as locally executed.
 
 ## Deferred features

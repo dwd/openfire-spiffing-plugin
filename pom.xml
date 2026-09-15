@@ -21,7 +21,7 @@
     </licenses>
     <properties>
         <openfire.version>5.0.0</openfire.version>
-        <maven.compiler.release>22</maven.compiler.release>
+        <maven.compiler.release>17</maven.compiler.release>
         <!-- Openfire owns this library and loads it before plugin dependencies. -->
         <bouncycastle.version>1.78.1</bouncycastle.version>
     </properties>

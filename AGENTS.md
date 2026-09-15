@@ -22,6 +22,6 @@
 This plugin implements server security-label enforcement using XEP-0258 and
 Spiffing Java. Openfire source is in `../openfire`; the Spiffing Java library is
 in `../spiffing-java`. Follow `README.md` for dependency installation and building.
-The minimum runtime is Java 22. The test suite uses real Spiffing policy fixtures
+The minimum runtime is Java 17. The test suite uses real Spiffing policy fixtures
 and XMPP message objects, with injected adapters for persistence and lifecycle
 behavior that would otherwise require a running Openfire server.

@@ -8,7 +8,7 @@ Settings → Spiffing security labels**. Saving checks both policy validity and
 clearance authorization of the default. Inbound messages are checked before
 routing; unlabelled messages are stamped with that default.
 
-Requires **Openfire 5.0.0 or later running Java 22 or later**. The Java requirement
+Requires **Openfire 5.0.0 or later running Java 17 or later**. The Java requirement
 comes from Spiffing. This is the first server enforcement increment, not a full
 implementation of every XEP-0258 feature.
 

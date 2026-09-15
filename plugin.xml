@@ -12,7 +12,7 @@
     <date>2026-09-09</date>
     <!-- Minimal supported Openfire version, same as Maven "plugins" parent pom -->
     <minServerVersion>5.0.0</minServerVersion>
-    <minJavaVersion>22</minJavaVersion>
+    <minJavaVersion>17</minJavaVersion>
 
     <!-- Admin console entries -->
     <adminconsole>
