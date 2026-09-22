@@ -3,7 +3,8 @@
 Status: first server-enforcement increment implemented, September 9, 2026.
 An enforcement-mode switch (warn/enforce) was added September 15, 2026.
 Label catalogue discovery (add/list/remove in the Admin Console) was added
-September 15, 2026.
+September 15, 2026. Settings storage was switched from an atomic file to
+Openfire properties on September 22, 2026, per explicit user direction.
 
 ## Objective and confirmed requirements
 
@@ -52,21 +53,29 @@ reference. Message threads read one snapshot per message without waiting for
 saves. Registries and policy objects are privately owned and never mutated after
 publication; mutable envelope templates are copied for each stamped message.
 
-`FileConfigurationStore` writes a temporary file in `OPENFIRE_HOME/conf` and
-atomically replaces `spiffing.xml`. It does not fall back to a non-atomic move.
-A write failure leaves the previous runtime configuration active. On startup,
-a missing, unreadable, oversized, or invalid file leaves enforcement unconfigured
-and blocks ordinary messages. Administrators can recover by saving valid settings.
-The Openfire process needs directory write permission. The file lives outside
-the plugin extraction directory so plugin upgrades do not erase it.
+`JiveGlobalsConfigurationStore` persists each `Settings` field as its own
+`JiveGlobals` property under the `plugin.spiffing.settings.*` prefix. This
+replaces an earlier atomic-file store (`FileConfigurationStore`, writing
+`OPENFIRE_HOME/conf/spiffing.xml`), at the user's explicit request to use
+"database and properties, as is the usual idiom for Openfire and its plugins"
+instead of a plugin-managed XML file. `JiveGlobals` persists to the `ofProperty`
+database table for a database-backed installation, or to a standalone XML
+properties file otherwise; either way, the plugin no longer manages its own
+configuration file.
 
-This file-based choice avoids Openfire's `JiveProperties` behavior of swallowing
-SQL write failures while updating its memory cache and emitting change events.
-A configuration save therefore has an observable failure boundary. Atomic rename
-prevents partial files; this increment does not promise power-loss durability via
-file/directory fsync. External file edits are loaded only on plugin restart.
-Configuration distribution and simultaneous administration across cluster nodes
-are not supported; configure each node separately.
+This change knowingly gives up two properties the file-based store had: saving
+all fields is no longer one atomic operation (`write` issues one `setProperty`
+call per field, so a failure partway through can leave a mix of old and new
+values), and `JiveGlobals`/`JiveProperties` can swallow an underlying SQL write
+failure while still updating its in-memory cache, so a failed save is not
+guaranteed to surface as an error to the administrator. Both trade-offs were
+raised with, and accepted by, the user in favor of the more idiomatic storage
+mechanism (see the "Catalog storage" and "Storage mechanism" clarification
+questions/answers in the issue history). On startup, missing or incomplete
+properties leave enforcement unconfigured and block ordinary messages, exactly
+as the file-based store did; administrators recover by saving valid settings
+again. Configuration distribution and simultaneous administration across
+cluster nodes are not supported; configure each node separately.
 
 The Admin Console relies on Openfire's administrator authentication. Writes
 require POST and matching CSRF cookie/token values. Submitted documents are
@@ -130,9 +139,10 @@ valid, active configuration.
 
 `WARN` is the safe default so administrators can roll out a new or changed
 policy and observe real traffic against it before switching to `ENFORCE`.
-Settings documents saved before this switch existed have no `enforcement`
-attribute; `Settings.fromXml` treats that as `WARN`, matching the new default
-and never silently upgrading an existing deployment to rejection behavior.
+Stored settings saved before this switch existed have no `enforcementMode`
+property; `JiveGlobalsConfigurationStore.read` treats that as `WARN`, matching
+the new default and never silently upgrading an existing deployment to
+rejection behavior.
 
 ## Label envelope and policy semantics
 
@@ -195,7 +205,8 @@ exceptions are required by its business rules.
 ## Input bounds and XML handling
 
 Policy input is limited to 1,048,576 Java characters; clearance/default payloads
-to 65,536 characters each. The settings envelope and file reads are bounded too.
+to 65,536 characters each; these limits are enforced by `Settings`'s compact
+constructor regardless of how a candidate settings value is constructed.
 Incoming label trees are checked iteratively before recursive serialization:
 maximum depth 32, 1,024 elements, and a 65,536-character text/name/attribute budget.
 Openfire's stanza-size limits remain an additional boundary. These limits bound
@@ -245,14 +256,16 @@ message objects. Coverage includes:
   sanitized rejection addressing, missing configuration, errors without loops,
   outbound/non-message exclusions, and failed reply delivery.
 - Configuration round trips, complete-save/restart restoration, invalid saves,
-  storage failures, startup recovery, concurrent snapshot reads, actual atomic
-  file replacement and cleanup, CSRF/method/missing-field rejection, and plugin
-  registration/removal/discovery lifecycle.
+  storage failures, startup recovery, concurrent snapshot reads,
+  CSRF/method/missing-field rejection, and plugin registration/removal/discovery
+  lifecycle. `JiveGlobalsConfigurationStore` itself is not unit-tested directly,
+  since `JiveGlobals` requires a running Openfire server context; `ConfigurationService`
+  is tested against an in-memory fake of the `Store` interface instead, the same
+  pattern already used for `CatalogService`/`DatabaseCatalogStore`.
 - Warn-vs-enforce behavior: a denied/malformed label is logged and passed through
-  unchanged in warn mode versus rejected in enforce mode, enforcement-mode XML
-  round-tripping, the Admin Console form field, and defaulting to warn both for a
-  brand-new configuration and for a settings document saved before this switch
-  existed (no `enforcement` attribute on disk).
+  unchanged in warn mode versus rejected in enforce mode, the Admin Console form
+  field, and defaulting to warn both for a brand-new configuration and for
+  settings saved before this switch existed (no `enforcementMode` property).
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
@@ -263,9 +276,9 @@ was built. The 1.84 compatibility variant was not re-run in this session.
 
 `mvn verify` compiles the Admin Console JSP, runs the suite, and builds the plugin
 archive. Archive inspection checks generated servlet mappings and bundled JARs.
-The file-store tests use a temporary directory; lifecycle tests inject an Openfire
-adapter rather than booting a server. No live Openfire installation, browser
-session, database, or federated XMPP pair was exercised in this workspace.
+Lifecycle tests inject an Openfire adapter rather than booting a server. No live
+Openfire installation, browser session, database, or federated XMPP pair was
+exercised in this workspace.
 
 Once the sibling `../spiffing-java` checkout was updated to build cleanly on
 Java 17, a full local `mvn verify` running javac under `--release 17` (Temurin
@@ -291,13 +304,14 @@ with the user before implementation:
 
 - **Storage**: catalogue entries are persisted in the Openfire database, in a
   new `ofSpiffingCatalog` table (schema in `src/main/database/spiffing_*.sql`,
-  registered via `plugin.xml`'s `<databaseKey>`/`<databaseVersion>`), not in the
-  file-based `spiffing.xml` used for policy/clearance/default-label settings.
-  This keeps the catalogue's own lifecycle (frequent, independent add/remove)
-  separate from the atomic-file settings document, and matches how Openfire
-  plugins normally store lists of records. `DatabaseCatalogStore` implements the
-  `CatalogStore` interface using `DbConnectionManager`, mirroring the JDBC
-  patterns used elsewhere in Openfire.
+  registered via `plugin.xml`'s `<databaseKey>`/`<databaseVersion>`), distinct
+  from the `JiveGlobals` properties used for policy/clearance/default-label
+  settings. This keeps the catalogue's own lifecycle (frequent, independent
+  add/remove of a list of records) on direct JDBC via `DbConnectionManager`,
+  matching how Openfire plugins normally store lists of records, separately
+  from the settings' small, mostly-static set of scalar/document fields.
+  `DatabaseCatalogStore` implements the `CatalogStore` interface using
+  `DbConnectionManager`, mirroring the JDBC patterns used elsewhere in Openfire.
 - **Access control**: only requests from local entities are served (checked via
   `XMPPServer.isLocal(from)` through an injected predicate); federated/remote
   catalogue requests receive `not-authorized`. This is stricter than the base

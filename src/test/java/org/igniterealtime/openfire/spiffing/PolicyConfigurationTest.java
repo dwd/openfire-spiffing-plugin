@@ -168,6 +168,5 @@ class PolicyConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(xxe, s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat())));
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policy(), xxe, LabelFormat.XML, s.defaultLabel(), s.labelFormat(), s.outputFormat())));
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policy(), s.clearance(), s.clearanceFormat(), xxe, LabelFormat.XML, s.outputFormat())));
-        assertThrows(IllegalArgumentException.class, () -> Settings.fromXml(xxe));
     }
 }

@@ -4,7 +4,6 @@ import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.openfire.container.PluginManager;
 import org.jivesoftware.openfire.interceptor.InterceptorManager;
-import org.jivesoftware.util.JiveGlobals;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.xmpp.packet.JID;
@@ -55,7 +54,7 @@ public final class SpiffingPlugin implements Plugin {
     public synchronized void initializePlugin(PluginManager manager, File directory) {
         if (interceptor != null) return;
         if (configuration == null) {
-            configuration = new ConfigurationService(new FileConfigurationStore(JiveGlobals.getHomePath().resolve("conf/spiffing.xml")));
+            configuration = new ConfigurationService(new JiveGlobalsConfigurationStore());
         }
         if (catalog == null) {
             catalog = new CatalogService(new DatabaseCatalogStore(), configuration::current);

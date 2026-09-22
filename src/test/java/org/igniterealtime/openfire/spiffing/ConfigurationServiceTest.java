@@ -1,45 +1,23 @@
 package org.igniterealtime.openfire.spiffing;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigurationServiceTest {
     static final class Store implements ConfigurationService.Store {
-        String value;
+        Settings value;
         int writes;
         boolean fail;
-        public String read() { return value; }
-        public void write(String value) {
+        public Settings read() { return value; }
+        public void write(Settings value) {
             if (fail) throw new IllegalStateException("storage unavailable");
             this.value = value;
             writes++;
         }
     }
 
-    @Test void settingsRoundTripEscapedXmlAndUnicode() {
-        Settings s = Fixtures.settings();
-        var input = new Settings(s.policy() + "<!-- <& café -->", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
-        assertEquals(input, Settings.fromXml(input.toXml()));
-    }
-
-    @Test void enforcementModeRoundTripsThroughXml() {
-        var enforce = Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE);
-        assertEquals(EnforcementMode.ENFORCE, Settings.fromXml(enforce.toXml()).enforcementMode());
-        var warn = Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN);
-        assertEquals(EnforcementMode.WARN, Settings.fromXml(warn.toXml()).enforcementMode());
-    }
-
-    @Test void documentSavedBeforeEnforcementSwitchExistedDefaultsToWarn() {
-        Settings s = Fixtures.settings();
-        // Simulate a pre-existing on-disk document that predates the "enforcement" attribute.
-        String legacy = s.toXml().replaceFirst(" enforcement=[\"'][A-Z]+[\"']", "");
-        assertEquals(EnforcementMode.WARN, Settings.fromXml(legacy).enforcementMode());
-    }
-
-    @Test void savesAndLoadsValidatedConfigurationAsOneProperty() {
+    @Test void savesAndLoadsValidatedConfiguration() {
         var store = new Store();
         var service = new ConfigurationService(store);
         service.reload();
@@ -57,7 +35,7 @@ class ConfigurationServiceTest {
         var service = new ConfigurationService(store);
         service.save(Fixtures.settings());
         var before = service.current();
-        String persisted = store.value;
+        Settings persisted = store.value;
         var s = Fixtures.settings();
         assertThrows(IllegalArgumentException.class, () -> service.save(new Settings(s.policy(), s.clearance(), s.clearanceFormat(),
             Fixtures.read("food-label-water"), s.labelFormat(), s.outputFormat())));
@@ -80,7 +58,9 @@ class ConfigurationServiceTest {
         var store = new Store();
         var service = new ConfigurationService(store);
         service.save(Fixtures.settings());
-        store.value = "broken";
+        var s = Fixtures.settings();
+        // Simulate corrupted stored settings, e.g. a policy edited outside the Admin Console.
+        store.value = new Settings("not a valid Open XML SPIF", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
         assertThrows(IllegalArgumentException.class, service::reload);
         assertNull(service.current());
         service.save(Fixtures.settings());
@@ -88,13 +68,6 @@ class ConfigurationServiceTest {
         store.value = null;
         service.reload();
         assertNull(service.current());
-    }
-
-    @ParameterizedTest @ValueSource(strings={"<x/>", "<spiffing-settings version='2'/>",
-        "<spiffing-settings version='1'><policy>a</policy><policy>b</policy><default-label/></spiffing-settings>",
-        "<spiffing-settings version='1'><policy>a</policy><clearance format='BAD'>b</clearance><default-label/></spiffing-settings>"})
-    void rejectsCorruptedOrUnknownSettingsSchema(String xml) {
-        assertThrows(RuntimeException.class, () -> Settings.fromXml(xml));
     }
 
     @Test void rejectsBlankAndOversizedSettings() {
@@ -108,8 +81,8 @@ class ConfigurationServiceTest {
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
         var store = new ConfigurationService.Store() {
-            public String read() { return Fixtures.settings().toXml(); }
-            public void write(String value) {
+            public Settings read() { return Fixtures.settings(); }
+            public void write(Settings value) {
                 started.countDown();
                 try {
                     if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("timeout");

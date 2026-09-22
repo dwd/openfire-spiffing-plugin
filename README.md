@@ -53,12 +53,15 @@ format used when stamping defaults; ESS is the initial selection. The plugin
 generates the XEP-0258 envelope and policy-derived display marking. Existing
 permitted labels retain their original encoding and marking.
 
-Configuration is stored atomically in **`OPENFIRE_HOME/conf/spiffing.xml`**. The
-Openfire process must be able to write that directory. Save changes through the
-Admin Console; manual file changes take effect on plugin restart. Invalid saves
-preserve the previous configuration. A missing, unreadable, or invalid file at
-startup blocks ordinary messages. Back up this file with the server configuration.
-Configuration is per node; automatic cluster distribution is not implemented.
+Configuration is stored as individual Openfire properties under the
+`plugin.spiffing.settings.*` namespace (the `ofProperty` database table for a
+database-backed installation, or the standalone XML properties file otherwise),
+the usual idiom for Openfire and its plugins. Save changes through the Admin
+Console. Invalid saves preserve the previous configuration. Missing or
+corrupted stored settings at startup block ordinary messages. Back up the
+Openfire database (or standalone properties file) to preserve this
+configuration. Configuration is per node; automatic cluster distribution is
+not implemented.
 
 ## Enforcement scope
 

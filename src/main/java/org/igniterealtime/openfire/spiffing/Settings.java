@@ -1,7 +1,5 @@
 package org.igniterealtime.openfire.spiffing;
 
-import org.dom4j.DocumentHelper;
-import org.dom4j.Element;
 import java.util.Objects;
 
 /** All settings are persisted together, so readers never see a partial policy update. */
@@ -22,39 +20,5 @@ public record Settings(String policy, String clearance, LabelFormat clearanceFor
     public Settings(String policy, String clearance, LabelFormat clearanceFormat,
                      String defaultLabel, LabelFormat labelFormat, LabelFormat outputFormat) {
         this(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, EnforcementMode.WARN);
-    }
-
-    public String toXml() {
-        Element root = DocumentHelper.createElement("spiffing-settings");
-        root.addAttribute("version", "1");
-        root.addAttribute("enforcement", enforcementMode.name());
-        root.addElement("policy").setText(policy);
-        root.addElement("clearance").addAttribute("format", clearanceFormat.name()).setText(clearance);
-        root.addElement("default-label").addAttribute("format", labelFormat.name())
-            .addAttribute("output", outputFormat.name()).setText(defaultLabel);
-        return root.asXML();
-    }
-
-    public static Settings fromXml(String xml) {
-        Element root = SecureXml.parse(xml, SecureXml.MAX_DOCUMENT * 6);
-        if (!root.getName().equals("spiffing-settings") || !root.getNamespaceURI().isEmpty()
-            || !"1".equals(root.attributeValue("version")) || root.elements().size() != 3) {
-            throw new IllegalArgumentException("Unsupported settings document.");
-        }
-        Element policy = single(root, "policy"), clearance = single(root, "clearance"), label = single(root, "default-label");
-        // Documents saved before this switch existed have no "enforcement" attribute; default to the safe "warn" mode.
-        String enforcement = root.attributeValue("enforcement");
-        EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
-        return new Settings(policy.getText(), clearance.getText(), LabelFormat.valueOf(clearance.attributeValue("format")),
-            label.getText(), LabelFormat.valueOf(label.attributeValue("format")), LabelFormat.valueOf(label.attributeValue("output")),
-            enforcementMode);
-    }
-
-    private static Element single(Element root, String name) {
-        var matches = root.elements(org.dom4j.QName.get(name));
-        if (matches.size() != 1 || !matches.get(0).elements().isEmpty()) {
-            throw new IllegalArgumentException("Invalid settings field.");
-        }
-        return matches.get(0);
     }
 }

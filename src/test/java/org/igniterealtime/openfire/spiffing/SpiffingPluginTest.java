@@ -64,7 +64,9 @@ class SpiffingPluginTest {
     @Test void corruptedStartupStillRegistersEnforcementAndAdminSaveRecovers() {
         var runtime = new Runtime();
         var store = new ConfigurationServiceTest.Store();
-        store.value = "broken";
+        var s = Fixtures.settings();
+        // Simulate corrupted stored settings, e.g. a policy edited outside the Admin Console.
+        store.value = new Settings("not a valid Open XML SPIF", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
         var configuration = new ConfigurationService(store);
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
