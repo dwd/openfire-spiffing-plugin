@@ -3,6 +3,7 @@ package org.igniterealtime.openfire.spiffing;
 import org.dom4j.Element;
 import org.jivesoftware.openfire.interceptor.PacketInterceptor;
 import org.jivesoftware.openfire.interceptor.PacketRejectedException;
+import org.jivesoftware.openfire.session.OutgoingServerSession;
 import org.jivesoftware.openfire.session.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,17 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
 
     @Override
     public void interceptPacket(Packet packet, Session session, boolean incoming, boolean processed) throws PacketRejectedException {
-        if (!incoming || processed || !(packet instanceof Message message)) return;
+        if (!(packet instanceof Message message)) return;
+        if (!incoming) {
+            // Optional, best-effort: before a message leaves for another server, drop a label that is
+            // the same as the configured default (identified by display marking, not full label
+            // equivalence), so the default is not gratuitously exposed to remote domains. This never
+            // rejects or otherwise blocks federated traffic; a missing/unconfigured snapshot, a disabled
+            // option, or any label that does not match the default marking simply leaves the message as is.
+            if (!processed && session instanceof OutgoingServerSession) stripDefaultLabelForFederation(message);
+            return;
+        }
+        if (processed) return;
         var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
         // XEP-0258 §6: errors are not authorized or stamped, and labelled errors are discarded.
         if (message.getType() == Message.Type.error) {
@@ -57,6 +68,27 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
                 LOG.warn("Security label check failed for message from {} to {} (id {}): {}. Enforcement mode is warn, so the message was allowed through.",
                     message.getFrom(), message.getTo(), message.getID(), e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Removes an outbound label whose display marking matches the configured default's, so that
+     * federated traffic does not gratuitously carry the default label to another server. Only a single,
+     * well-formed envelope with a non-empty marking equal to the default's is eligible; anything else
+     * (no configuration, the option disabled, no label, more than one label, or a different/absent
+     * marking) is left completely unchanged.
+     */
+    private void stripDefaultLabelForFederation(Message message) {
+        PolicyConfiguration snapshot = configuration.get();
+        if (snapshot == null || !snapshot.settings().stripDefaultLabelForFederation()) return;
+        var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
+        if (labels.size() != 1) return;
+        String defaultMarking = snapshot.defaultDisplayMarking();
+        if (defaultMarking == null || defaultMarking.isEmpty()) return;
+        try {
+            if (defaultMarking.equals(PolicyConfiguration.displayMarking(labels.get(0)))) labels.get(0).detach();
+        } catch (RuntimeException e) {
+            // A malformed label is not our concern here; leave the message exactly as it arrived.
         }
     }
 

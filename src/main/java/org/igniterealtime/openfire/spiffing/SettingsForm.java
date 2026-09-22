@@ -19,9 +19,11 @@ public final class SettingsForm {
             // Missing field (e.g. a form saved before this switch existed) defaults to the safe "warn" mode.
             String enforcement = fields.get("enforcementMode");
             EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
+            // A checkbox is absent from the submission entirely when unchecked, so a missing field means "off".
+            boolean stripDefaultLabelForFederation = Boolean.parseBoolean(fields.get("stripDefaultLabelForFederation"));
             settings = new Settings(fields.get("policy"), fields.get("clearance"), LabelFormat.valueOf(fields.get("clearanceFormat")),
                 fields.get("label"), LabelFormat.valueOf(fields.get("labelFormat")), LabelFormat.valueOf(fields.get("outputFormat")),
-                enforcementMode);
+                enforcementMode, stripDefaultLabelForFederation);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Provide all documents and select valid formats.");
         }

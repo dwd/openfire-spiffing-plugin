@@ -26,7 +26,9 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
             // Properties saved before the enforcement switch existed have none; default to the safe "warn" mode.
             String enforcement = JiveGlobals.getProperty(PREFIX + "enforcementMode");
             EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
-            return new Settings(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode);
+            // Properties saved before this switch existed have none; default to not stripping.
+            boolean stripDefaultLabelForFederation = JiveGlobals.getBooleanProperty(PREFIX + "stripDefaultLabelForFederation", false);
+            return new Settings(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode, stripDefaultLabelForFederation);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Stored Spiffing settings are incomplete or corrupted.", e);
         }
@@ -41,6 +43,7 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
         JiveGlobals.setProperty(PREFIX + "labelFormat", settings.labelFormat().name());
         JiveGlobals.setProperty(PREFIX + "outputFormat", settings.outputFormat().name());
         JiveGlobals.setProperty(PREFIX + "enforcementMode", settings.enforcementMode().name());
+        JiveGlobals.setProperty(PREFIX + "stripDefaultLabelForFederation", Boolean.toString(settings.stripDefaultLabelForFederation()));
     }
 
     private static String require(String key) {

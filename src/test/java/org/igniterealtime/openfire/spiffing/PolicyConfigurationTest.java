@@ -30,6 +30,13 @@ class PolicyConfigurationTest {
         assertFalse(configuration.defaultEnvelope().elements().isEmpty(), "stanzas cannot mutate the configured template");
     }
 
+    @Test void defaultDisplayMarkingMatchesTheStampedEnvelopesMarking() {
+        var configuration = new PolicyConfiguration(Fixtures.settings());
+        Element marking = configuration.defaultEnvelope().element(QName.get("displaymarking", PolicyConfiguration.NAMESPACE));
+        assertEquals(marking.getTextTrim(), configuration.defaultDisplayMarking());
+        assertFalse(configuration.defaultDisplayMarking().isEmpty());
+    }
+
     @ParameterizedTest @EnumSource(LabelFormat.class)
     void permitsInboundLabelInEachFormat(LabelFormat format) {
         var configuration = new PolicyConfiguration(Fixtures.settings());

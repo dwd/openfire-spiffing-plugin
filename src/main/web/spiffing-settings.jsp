@@ -21,6 +21,7 @@
     String labelFormat = saved == null ? "XML" : saved.labelFormat().name();
     String outputFormat = saved == null ? "ESS" : saved.outputFormat().name();
     String enforcementMode = saved == null ? EnforcementMode.WARN.name() : saved.enforcementMode().name();
+    boolean stripDefaultLabelForFederation = saved != null && saved.stripDefaultLabelForFederation();
     String error = null;
     if ("POST".equals(request.getMethod())) {
         final Cookie csrfCookie = CookieUtils.getCookie(request, "csrf");
@@ -35,6 +36,8 @@
             labelFormat = request.getParameter("labelFormat");
             outputFormat = request.getParameter("outputFormat");
             enforcementMode = request.getParameter("enforcementMode");
+            // A checkbox is absent from the submission entirely when unchecked.
+            stripDefaultLabelForFederation = request.getParameter("stripDefaultLabelForFederation") != null;
             try {
                 final HashMap<String, String> fields = new HashMap<>();
                 fields.put("policy", policy);
@@ -44,6 +47,7 @@
                 fields.put("labelFormat", labelFormat);
                 fields.put("outputFormat", outputFormat);
                 fields.put("enforcementMode", enforcementMode);
+                fields.put("stripDefaultLabelForFederation", Boolean.toString(stripDefaultLabelForFederation));
                 SettingsForm.save(request.getMethod(), csrfCookie.getValue(), csrfParam, fields, plugin::save);
                 response.sendRedirect("spiffing-settings.jsp?saved=true");
                 return;
@@ -66,6 +70,7 @@
     pageContext.setAttribute("labelFormat", labelFormat);
     pageContext.setAttribute("outputFormat", outputFormat);
     pageContext.setAttribute("enforcementMode", enforcementMode);
+    pageContext.setAttribute("stripDefaultLabelForFederation", stripDefaultLabelForFederation);
     pageContext.setAttribute("formats", LabelFormat.values());
     pageContext.setAttribute("enforcementModes", EnforcementMode.values());
 %>
@@ -118,6 +123,12 @@
                 <c:forEach var="mode" items="${enforcementModes}"><option value="${mode}" ${mode eq enforcementMode ? 'selected' : ''}>${mode}</option></c:forEach>
             </select></p>
         <p>Warn logs the failure and lets the message through unchanged. Enforce rejects the message with an error. Warn is the safe default for staged rollout.</p>
+        <p><label for="stripDefaultLabelForFederation">
+            <input type="checkbox" id="stripDefaultLabelForFederation" name="stripDefaultLabelForFederation" ${stripDefaultLabelForFederation ? 'checked' : ''}/>
+            Strip the default label before sending a message to another server</label></p>
+        <p>When enabled, an outbound message whose label's display marking matches the default label's is stripped before it
+            leaves for a remote server, so the default is not gratuitously exposed to other domains. A label with a different
+            or absent display marking is never touched. Off by default.</p>
     </admin:contentBox>
     <input type="submit" value="Save settings"/>
 </form>

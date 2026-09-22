@@ -18,8 +18,12 @@ final class Fixtures {
     static Settings settings(LabelFormat output) { return settings(output, EnforcementMode.ENFORCE); }
 
     static Settings settings(LabelFormat output, EnforcementMode enforcementMode) {
+        return settings(output, enforcementMode, false);
+    }
+
+    static Settings settings(LabelFormat output, EnforcementMode enforcementMode, boolean stripDefaultLabelForFederation) {
         return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
-            read("food-label-milk-chocolate"), LabelFormat.XML, output, enforcementMode);
+            read("food-label-milk-chocolate"), LabelFormat.XML, output, enforcementMode, stripDefaultLabelForFederation);
     }
 
     static Element envelope(String fixture, LabelFormat format) {

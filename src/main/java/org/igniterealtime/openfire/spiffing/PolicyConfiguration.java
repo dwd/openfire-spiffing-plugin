@@ -26,6 +26,7 @@ public final class PolicyConfiguration {
     private final Clearance clearance;
     private final Label defaultLabel;
     private final Element defaultEnvelope;
+    private final String defaultDisplayMarking;
 
     public PolicyConfiguration(Settings settings) {
         this.settings = settings;
@@ -44,6 +45,7 @@ public final class PolicyConfiguration {
             defaultLabel = site.label(settings.labelFormat().decode(settings.defaultLabel()), settings.labelFormat().format);
             authorize(defaultLabel);
             defaultEnvelope = encode(defaultLabel, settings.outputFormat());
+            defaultDisplayMarking = displayMarking(defaultEnvelope);
             // Serialization must not change the access decision or label semantics.
             Label roundTrip = payload(defaultEnvelope.element(QName.get("label", NAMESPACE)).elements().get(0));
             authorize(roundTrip);
@@ -56,6 +58,20 @@ public final class PolicyConfiguration {
     public Settings settings() { return settings; }
 
     public Element defaultEnvelope() { return defaultEnvelope.createCopy(); }
+
+    /**
+     * The default label's display marking (as produced by {@link #defaultEnvelope()}), or {@code null}/empty
+     * if the policy has none. Used to identify "the same label" as the configured default by its rendered
+     * marking rather than by re-deriving full classification/category equivalence, when stripping the
+     * default label before sending a message to another server.
+     */
+    public String defaultDisplayMarking() { return defaultDisplayMarking; }
+
+    /** Extracts the optional {@code <displaymarking>} text from a XEP-0258 envelope, or {@code null} if absent. */
+    static String displayMarking(Element envelope) {
+        Element marking = envelope.element(QName.get("displaymarking", NAMESPACE));
+        return marking == null ? null : marking.getTextTrim();
+    }
 
     /**
      * Validates an arbitrary label payload against this policy and clearance and encodes it as a

@@ -187,4 +187,81 @@ class SecurityLabelInterceptorTest {
         interceptor.interceptPacket(message(), null, true, false);
         assertEquals(1, reads[0]);
     }
+
+    private static org.jivesoftware.openfire.session.OutgoingServerSession outgoingServerSession() {
+        return (org.jivesoftware.openfire.session.OutgoingServerSession) java.lang.reflect.Proxy.newProxyInstance(
+            SecurityLabelInterceptorTest.class.getClassLoader(),
+            new Class<?>[]{org.jivesoftware.openfire.session.OutgoingServerSession.class},
+            (proxy, method, args) -> { throw new AssertionError("Stripping must not depend on session state"); });
+    }
+
+    @Test void stripsLabelMatchingDefaultMarkingBeforeSendingToAnotherServer() throws Exception {
+        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(strippingConfiguration.defaultEnvelope());
+        strippingInterceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void doesNotStripWhenOptionIsDisabled() throws Exception {
+        var message = message(); // `configuration` fixture defaults to stripDefaultLabelForFederation=false
+        message.getElement().add(configuration.defaultEnvelope());
+        String before = message.toXML();
+        interceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+    }
+
+    @Test void doesNotStripLabelWithADifferentDisplayMarking() throws Exception {
+        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.XML, EnforcementMode.ENFORCE, true));
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.XML));
+        String before = message.toXML();
+        strippingInterceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+    }
+
+    @Test void doesNotStripForLocalClientDelivery() throws Exception {
+        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(strippingConfiguration.defaultEnvelope());
+        String before = message.toXML();
+        // A plain (non-outgoing-server) session, e.g. a local client, must never have its label stripped.
+        var localSession = (org.jivesoftware.openfire.session.Session) java.lang.reflect.Proxy.newProxyInstance(
+            getClass().getClassLoader(), new Class<?>[]{org.jivesoftware.openfire.session.Session.class},
+            (proxy, method, args) -> { throw new AssertionError("Stripping must not depend on session state"); });
+        strippingInterceptor.interceptPacket(message, localSession, false, false);
+        strippingInterceptor.interceptPacket(message, null, false, false);
+        assertEquals(before, message.toXML());
+    }
+
+    @Test void doesNotStripWithoutConfiguration() throws Exception {
+        var unconfigured = new SecurityLabelInterceptor(() -> null, replies::add);
+        var message = message();
+        message.getElement().add(configuration.defaultEnvelope());
+        String before = message.toXML();
+        unconfigured.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void doesNotStripAfterProcessedOrMultipleLabels() throws Exception {
+        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        var afterSend = message();
+        afterSend.getElement().add(strippingConfiguration.defaultEnvelope());
+        String beforeAfterSend = afterSend.toXML();
+        strippingInterceptor.interceptPacket(afterSend, outgoingServerSession(), false, true);
+        assertEquals(beforeAfterSend, afterSend.toXML());
+
+        var duplicated = message();
+        duplicated.getElement().add(strippingConfiguration.defaultEnvelope());
+        duplicated.getElement().add(strippingConfiguration.defaultEnvelope());
+        String beforeDuplicated = duplicated.toXML();
+        strippingInterceptor.interceptPacket(duplicated, outgoingServerSession(), false, false);
+        assertEquals(beforeDuplicated, duplicated.toXML());
+    }
 }

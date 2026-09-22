@@ -4,7 +4,10 @@ Status: first server-enforcement increment implemented, September 9, 2026.
 An enforcement-mode switch (warn/enforce) was added September 15, 2026.
 Label catalogue discovery (add/list/remove in the Admin Console) was added
 September 15, 2026. Settings storage was switched from an atomic file to
-Openfire properties on September 22, 2026, per explicit user direction.
+Openfire properties on September 22, 2026, per explicit user direction. An
+optional outbound default-label stripping switch for server-to-server traffic
+was added September 22, 2026 (see "Outbound default-label stripping for
+federation" below).
 
 ## Objective and confirmed requirements
 
@@ -87,9 +90,11 @@ starting the Admin Console.
 ## Message processing
 
 `SpiffingPlugin` registers a global `SecurityLabelInterceptor` and advertises
-`urn:xmpp:sec-label:0`. Plugin destruction removes both. The interceptor handles
-only inbound `Message` callbacks before processing (`incoming && !processed`).
-Outbound, postprocessing, IQ, and presence callbacks are outside this increment.
+`urn:xmpp:sec-label:0`. Plugin destruction removes both. The interceptor's
+inbound stamping/checking logic below only handles inbound `Message` callbacks
+before processing (`incoming && !processed`); its separate outbound handling is
+described in "Outbound default-label stripping for federation". Postprocessing,
+IQ, and presence callbacks remain outside this increment.
 
 1. For error messages, bypass authorization and stamping. Discard an error with
    a direct XEP-0258 security label without generating a reply.
@@ -143,6 +148,49 @@ Stored settings saved before this switch existed have no `enforcementMode`
 property; `JiveGlobalsConfigurationStore.read` treats that as `WARN`, matching
 the new default and never silently upgrading an existing deployment to
 rejection behavior.
+
+## Outbound default-label stripping for federation
+
+Optional, off-by-default `Settings.stripDefaultLabelForFederation` (a boolean,
+independent of `enforcementMode`) lets an administrator strip a message's
+security label before it leaves for another server, when that label is "the
+same" as the configured default. Confirmed with the user before implementation:
+
+- **Trigger point**: `SecurityLabelInterceptor` already implements
+  `PacketInterceptor`; it now also handles the `!incoming` (outbound) callback,
+  restricted to `!processed && session instanceof OutgoingServerSession`. This
+  matches `LocalSession.process`, which invokes interceptors with
+  `read=false, processed=false` immediately before writing a packet to a
+  session's connection; `OutgoingServerSession` (implemented by
+  `LocalOutgoingServerSession`) is the public Openfire type for a server-to-server
+  session to a remote domain. Local client/component sessions and any other
+  outbound path are untouched, matching the issue's "sending to another server"
+  wording; this is narrower than every outbound message.
+- **"The same label"**: rather than re-deriving full policy equivalence (as
+  `PolicyConfiguration.check` already does for `<equivalentlabel>`, which requires
+  decoding both labels under the loaded policy), this feature compares only the
+  rendered `<displaymarking>` text of the outbound envelope against
+  `PolicyConfiguration.defaultDisplayMarking()`. The issue text explicitly allows
+  this simplification ("'the same display marking' ... is acceptable if actual
+  label equivalence is too difficult"). A `null`/empty default marking, more than
+  one label element, or a mismatched/absent marking on the outbound label all
+  leave the message unchanged; only an exact, non-empty match is stripped.
+- **Fail open, never reject**: unlike inbound enforcement, a missing/invalid
+  configuration snapshot, the option being disabled, or any exception while
+  reading the outbound label never blocks or errors the message; it is simply
+  left as sent. This is a best-effort minimization, not an enforcement control,
+  and must not add a new way to break federation.
+- **Configuration and persistence**: added as an eighth `Settings` record
+  component; two additional convenience constructors (six- and seven-argument)
+  preserve every existing call site, defaulting the new field to `false`.
+  `JiveGlobalsConfigurationStore` persists/reads it as
+  `plugin.spiffing.settings.stripDefaultLabelForFederation`
+  (`JiveGlobals.getBooleanProperty`, default `false`, so settings saved before
+  this switch existed are unaffected). `SettingsForm` and
+  `spiffing-settings.jsp` expose it as a single checkbox in the existing
+  "Enforcement" section; like an HTML checkbox in general, an absent form field
+  means unchecked/`false`, exactly like the `enforcementMode` missing-field
+  convention already used there.
 
 ## Label envelope and policy semantics
 
@@ -266,6 +314,12 @@ message objects. Coverage includes:
   unchanged in warn mode versus rejected in enforce mode, the Admin Console form
   field, and defaulting to warn both for a brand-new configuration and for
   settings saved before this switch existed (no `enforcementMode` property).
+- Outbound default-label stripping: a matching-marking label is removed only for
+  an `OutgoingServerSession` before send, is left untouched when the option is
+  disabled, when the marking differs or is absent, for local-session delivery,
+  after send (`processed`), with more than one label, or without a published
+  configuration; plus the `defaultDisplayMarking()` accessor and the
+  `SettingsForm`/JSP checkbox's missing-field-means-off convention.
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
@@ -294,6 +348,15 @@ smoke tests, including plugin reload, startup failure recovery, and actual serve
 classloader behavior. Browser rendering/escaping is reviewed in the JSP but is
 not exercised by a browser automation test. CI workflow execution on Java 17 is
 configured for CI, not separately exercised there in this session.
+
+After adding outbound default-label stripping, `mvn verify` was re-run in this
+session against the project's configured Bouncy Castle 1.78.1: **108 tests
+passed**, with no failures or skips, the Admin Console JSP compiled, and the
+plugin assembly jar was built. Live server-to-server delivery through an actual
+`LocalOutgoingServerSession` was not exercised; the outbound behavior is covered
+by direct `SecurityLabelInterceptor.interceptPacket` calls with an
+`OutgoingServerSession` test double, matching this suite's existing approach for
+the inbound path. The 1.84 compatibility variant was not re-run in this session.
 
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 

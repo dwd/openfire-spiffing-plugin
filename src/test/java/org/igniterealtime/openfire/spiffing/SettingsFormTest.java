@@ -33,6 +33,22 @@ class SettingsFormTest {
         assertEquals(List.of(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE)), saved);
     }
 
+    @Test void missingStripDefaultLabelFieldMeansDisabledAsForAnUncheckedCheckbox() {
+        // A checkbox is absent from the submission entirely when unchecked, just like the "enforcementMode" field
+        // being absent for a form saved before that switch existed.
+        List<Settings> saved = new ArrayList<>();
+        SettingsForm.save("POST", "token", "token", fields(), saved::add);
+        assertFalse(saved.get(0).stripDefaultLabelForFederation());
+    }
+
+    @Test void explicitStripDefaultLabelForFederationIsSaved() {
+        List<Settings> saved = new ArrayList<>();
+        var withStrip = fields();
+        withStrip.put("stripDefaultLabelForFederation", "true");
+        SettingsForm.save("POST", "token", "token", withStrip, saved::add);
+        assertTrue(saved.get(0).stripDefaultLabelForFederation());
+    }
+
     @Test void missingOrInvalidFieldsCannotSave() {
         for (String key : fields().keySet()) {
             var missing = fields();
