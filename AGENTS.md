@@ -14,6 +14,9 @@
   dependency compatibility when changing integration or dependency behavior.
 - Maintain the overall design in `doc/design.md`, including decisions,
   assumptions, scope, test coverage, and known limitations.
+- Keep `doc/acdf-checks.md` up to date: whenever a change affects what objects
+  carry a label/clearance, or what access-control checks occur at any point in
+  a message's lifetime, update that document to match.
 - Stop and ask questions when requirements or design choices need clarification.
   Record the resulting decisions in the design document.
 
