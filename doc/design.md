@@ -7,7 +7,9 @@ September 15, 2026. Settings storage was switched from an atomic file to
 Openfire properties on September 22, 2026, per explicit user direction. An
 optional outbound default-label stripping switch for server-to-server traffic
 was added September 22, 2026 (see "Outbound default-label stripping for
-federation" below).
+federation" below). `doc/acdf-checks.md` documents, as a standalone reference,
+which objects carry a label/clearance and which points in a message's
+lifetime perform a real access-control check, added September 23, 2026.
 
 ## Objective and confirmed requirements
 
