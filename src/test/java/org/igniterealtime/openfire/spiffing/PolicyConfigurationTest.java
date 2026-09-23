@@ -176,4 +176,59 @@ class PolicyConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policy(), xxe, LabelFormat.XML, s.defaultLabel(), s.labelFormat(), s.outputFormat())));
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policy(), s.clearance(), s.clearanceFormat(), xxe, LabelFormat.XML, s.outputFormat())));
     }
+
+    @Test void noPeerClearanceConfiguredByDefault() {
+        var configuration = new PolicyConfiguration(Fixtures.settings());
+        assertFalse(configuration.hasPeerClearance());
+    }
+
+    @Test void peerClearanceCanBeConfigured() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        assertTrue(configuration.hasPeerClearance());
+    }
+
+    @Test void invalidPeerClearanceIsRejectedAtConfigurationTime() {
+        var s = Fixtures.settings();
+        assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policy(), s.clearance(), s.clearanceFormat(),
+            s.defaultLabel(), s.labelFormat(), s.outputFormat(), EnforcementMode.ENFORCE, false, "not a valid clearance", LabelFormat.XML)));
+    }
+
+    @Test void checkPermitsLabelWhenPeerClearanceIsPermissive() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        Element envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        assertSame(envelope, configuration.check(envelope, true));
+    }
+
+    @Test void checkRejectsLabelDeniedByPeerClearanceEvenWhenServerClearancePermitsIt() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        Element envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.check(envelope)); // server clearance alone permits it
+        assertDoesNotThrow(() -> configuration.check(envelope, false)); // peer check not requested
+        assertThrows(RuntimeException.class, () -> configuration.check(envelope, true)); // peer clearance denies it
+    }
+
+    @Test void checkDefaultPeerClearanceRejectsWhenPeerClearanceDeniesTheDefault() {
+        var permissive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        assertDoesNotThrow(permissive::checkDefaultPeerClearance);
+        var restrictive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        assertThrows(RuntimeException.class, restrictive::checkDefaultPeerClearance);
+    }
+
+    @Test void checkDefaultPeerClearanceIsANoOpWithoutAConfiguredPeerClearance() {
+        var configuration = new PolicyConfiguration(Fixtures.settings());
+        assertDoesNotThrow(configuration::checkDefaultPeerClearance);
+    }
+
+    @Test void checkPeerClearanceOnEnvelopeIsANoOpWithoutAConfiguredPeerClearance() {
+        var configuration = new PolicyConfiguration(Fixtures.settings());
+        Element envelope = Fixtures.envelope("food-label-water", LabelFormat.XML); // denied by the server clearance
+        assertDoesNotThrow(() -> configuration.checkPeerClearance(envelope));
+    }
+
+    @Test void checkPeerClearanceOnEnvelopeRejectsADeniedLabel() {
+        var permissive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        assertDoesNotThrow(() -> permissive.checkPeerClearance(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML)));
+        var restrictive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        assertThrows(RuntimeException.class, () -> restrictive.checkPeerClearance(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML)));
+    }
 }

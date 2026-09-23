@@ -22,6 +22,8 @@
     String outputFormat = saved == null ? "ESS" : saved.outputFormat().name();
     String enforcementMode = saved == null ? EnforcementMode.WARN.name() : saved.enforcementMode().name();
     boolean stripDefaultLabelForFederation = saved != null && saved.stripDefaultLabelForFederation();
+    String peerClearance = saved == null ? "" : saved.peerClearance();
+    String peerClearanceFormat = saved == null ? "ESS" : saved.peerClearanceFormat().name();
     String error = null;
     if ("POST".equals(request.getMethod())) {
         final Cookie csrfCookie = CookieUtils.getCookie(request, "csrf");
@@ -38,6 +40,8 @@
             enforcementMode = request.getParameter("enforcementMode");
             // A checkbox is absent from the submission entirely when unchecked.
             stripDefaultLabelForFederation = request.getParameter("stripDefaultLabelForFederation") != null;
+            peerClearance = request.getParameter("peerClearance");
+            peerClearanceFormat = request.getParameter("peerClearanceFormat");
             try {
                 final HashMap<String, String> fields = new HashMap<>();
                 fields.put("policy", policy);
@@ -48,6 +52,8 @@
                 fields.put("outputFormat", outputFormat);
                 fields.put("enforcementMode", enforcementMode);
                 fields.put("stripDefaultLabelForFederation", Boolean.toString(stripDefaultLabelForFederation));
+                fields.put("peerClearance", peerClearance);
+                fields.put("peerClearanceFormat", peerClearanceFormat);
                 SettingsForm.save(request.getMethod(), csrfCookie.getValue(), csrfParam, fields, plugin::save);
                 response.sendRedirect("spiffing-settings.jsp?saved=true");
                 return;
@@ -71,6 +77,8 @@
     pageContext.setAttribute("outputFormat", outputFormat);
     pageContext.setAttribute("enforcementMode", enforcementMode);
     pageContext.setAttribute("stripDefaultLabelForFederation", stripDefaultLabelForFederation);
+    pageContext.setAttribute("peerClearance", peerClearance);
+    pageContext.setAttribute("peerClearanceFormat", peerClearanceFormat);
     pageContext.setAttribute("formats", LabelFormat.values());
     pageContext.setAttribute("enforcementModes", EnforcementMode.values());
 %>
@@ -129,6 +137,18 @@
         <p>When enabled, an outbound message whose label's display marking matches the default label's is stripped before it
             leaves for a remote server, so the default is not gratuitously exposed to other domains. A label with a different
             or absent display marking is never touched. Off by default.</p>
+    </admin:contentBox>
+    <admin:contentBox title="Peer clearance">
+        <p><label for="peerClearanceFormat">Peer clearance format</label>
+            <select id="peerClearanceFormat" name="peerClearanceFormat">
+                <c:forEach var="format" items="${formats}"><option value="${format}" ${format eq peerClearanceFormat ? 'selected' : ''}>${format}</option></c:forEach>
+            </select></p>
+        <p><label for="peerClearance">Peer clearance (maximum 64 KiB of text, optional)</label></p>
+        <textarea id="peerClearance" name="peerClearance" cols="100" rows="10" maxlength="65536"><c:out value="${peerClearance}"/></textarea>
+        <p>Optional. When set, a message's effective label is also checked against this clearance on ingress
+            (for messages arriving from another server) and on egress (for messages leaving to another server),
+            in addition to the server clearance check above, following the same warn/enforce setting. Leave blank
+            to skip peer-clearance checking entirely.</p>
     </admin:contentBox>
     <input type="submit" value="Save settings"/>
 </form>

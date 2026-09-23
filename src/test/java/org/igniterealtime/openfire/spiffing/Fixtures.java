@@ -26,6 +26,13 @@ final class Fixtures {
             read("food-label-milk-chocolate"), LabelFormat.XML, output, enforcementMode, stripDefaultLabelForFederation);
     }
 
+    /** A configuration with a configured peer clearance, built from an existing clearance fixture. */
+    static Settings settingsWithPeerClearance(String peerClearanceFixture, EnforcementMode enforcementMode) {
+        return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
+            read("food-label-milk-chocolate"), LabelFormat.XML, LabelFormat.ESS, enforcementMode, false,
+            read(peerClearanceFixture), LabelFormat.XML);
+    }
+
     static Element envelope(String fixture, LabelFormat format) {
         Site site = new Site();
         site.load(read("food-policy"));

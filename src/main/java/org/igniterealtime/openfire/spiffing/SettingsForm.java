@@ -21,9 +21,16 @@ public final class SettingsForm {
             EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
             // A checkbox is absent from the submission entirely when unchecked, so a missing field means "off".
             boolean stripDefaultLabelForFederation = Boolean.parseBoolean(fields.get("stripDefaultLabelForFederation"));
+            // The peer clearance is optional; a missing/empty field means none is configured, and a missing
+            // format field (e.g. a form saved before this feature existed) defaults harmlessly to ESS.
+            String peerClearance = fields.get("peerClearance");
+            if (peerClearance == null) peerClearance = "";
+            String peerClearanceFormatField = fields.get("peerClearanceFormat");
+            LabelFormat peerClearanceFormat = peerClearanceFormatField == null || peerClearanceFormatField.isEmpty()
+                ? LabelFormat.ESS : LabelFormat.valueOf(peerClearanceFormatField);
             settings = new Settings(fields.get("policy"), fields.get("clearance"), LabelFormat.valueOf(fields.get("clearanceFormat")),
                 fields.get("label"), LabelFormat.valueOf(fields.get("labelFormat")), LabelFormat.valueOf(fields.get("outputFormat")),
-                enforcementMode, stripDefaultLabelForFederation);
+                enforcementMode, stripDefaultLabelForFederation, peerClearance, peerClearanceFormat);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Provide all documents and select valid formats.");
         }

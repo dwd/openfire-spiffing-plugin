@@ -3,6 +3,7 @@ package org.igniterealtime.openfire.spiffing;
 import org.dom4j.Element;
 import org.jivesoftware.openfire.interceptor.PacketInterceptor;
 import org.jivesoftware.openfire.interceptor.PacketRejectedException;
+import org.jivesoftware.openfire.session.IncomingServerSession;
 import org.jivesoftware.openfire.session.OutgoingServerSession;
 import org.jivesoftware.openfire.session.Session;
 import org.slf4j.Logger;
@@ -28,12 +29,14 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
     public void interceptPacket(Packet packet, Session session, boolean incoming, boolean processed) throws PacketRejectedException {
         if (!(packet instanceof Message message)) return;
         if (!incoming) {
-            // Optional, best-effort: before a message leaves for another server, drop a label that is
-            // the same as the configured default (identified by display marking, not full label
-            // equivalence), so the default is not gratuitously exposed to remote domains. This never
-            // rejects or otherwise blocks federated traffic; a missing/unconfigured snapshot, a disabled
-            // option, or any label that does not match the default marking simply leaves the message as is.
-            if (!processed && session instanceof OutgoingServerSession) stripDefaultLabelForFederation(message);
+            // Egress: before a message leaves for another server, check its effective label against the
+            // configured peer clearance (a no-op when none is configured), following the same enforcement
+            // mode as every other label check. This runs before the optional, best-effort default-label
+            // stripping below, so a stripped label was still checked against the peer clearance first.
+            if (!processed && session instanceof OutgoingServerSession) {
+                checkPeerClearanceForFederation(message);
+                stripDefaultLabelForFederation(message);
+            }
             return;
         }
         if (processed) return;
@@ -48,13 +51,17 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
             reject(message, PacketError.Condition.service_unavailable);
             return;
         }
+        // Ingress: a message arriving from a federated peer is also checked against the peer clearance,
+        // in addition to the server clearance that every inbound message is always checked against.
+        boolean fromPeer = session instanceof IncomingServerSession;
         try {
             if (labels.size() > 1) throw new IllegalArgumentException();
             if (labels.isEmpty()) {
+                if (fromPeer) snapshot.checkDefaultPeerClearance();
                 message.getElement().add(snapshot.defaultEnvelope());
             } else {
                 Element original = labels.get(0);
-                Element checked = snapshot.check(original);
+                Element checked = snapshot.check(original, fromPeer);
                 if (checked != original) {
                     original.detach();
                     message.getElement().add(checked);
@@ -66,6 +73,30 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
             } else {
                 // Warn mode: log without the message body/label content and let the message through unchanged.
                 LOG.warn("Security label check failed for message from {} to {} (id {}): {}. Enforcement mode is warn, so the message was allowed through.",
+                    message.getFrom(), message.getTo(), message.getID(), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Checks an outbound message's effective label against the configured peer clearance before it leaves
+     * for another server, following {@code Settings.enforcementMode} exactly like every other label check
+     * (ENFORCE rejects, WARN logs and lets the message through unchanged). A missing/unconfigured snapshot,
+     * no configured peer clearance, an absent label, or more than one label are all left unchecked here,
+     * matching {@link #stripDefaultLabelForFederation}'s fail-open scope for those same conditions.
+     */
+    private void checkPeerClearanceForFederation(Message message) throws PacketRejectedException {
+        PolicyConfiguration snapshot = configuration.get();
+        if (snapshot == null) return;
+        var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
+        if (labels.size() != 1) return;
+        try {
+            snapshot.checkPeerClearance(labels.get(0));
+        } catch (RuntimeException e) {
+            if (snapshot.settings().enforcementMode() == EnforcementMode.ENFORCE) {
+                reject(message, PacketError.Condition.forbidden);
+            } else {
+                LOG.warn("Peer clearance check failed for message from {} to {} (id {}) leaving for another server: {}. Enforcement mode is warn, so the message was allowed through.",
                     message.getFrom(), message.getTo(), message.getID(), e.getMessage());
             }
         }

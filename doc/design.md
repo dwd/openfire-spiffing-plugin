@@ -9,7 +9,9 @@ optional outbound default-label stripping switch for server-to-server traffic
 was added September 22, 2026 (see "Outbound default-label stripping for
 federation" below). `doc/acdf-checks.md` documents, as a standalone reference,
 which objects carry a label/clearance and which points in a message's
-lifetime perform a real access-control check, added September 23, 2026.
+lifetime perform a real access-control check, added September 23, 2026. An
+optional default peer clearance, checked on federated ingress and egress, was
+added September 23, 2026 (see "Peer clearance" below).
 
 ## Objective and confirmed requirements
 
@@ -194,6 +196,76 @@ same" as the configured default. Confirmed with the user before implementation:
   means unchecked/`false`, exactly like the `enforcementMode` missing-field
   convention already used there.
 
+## Peer clearance
+
+Optional, unset-by-default `Settings.peerClearance` (with `Settings.peerClearanceFormat`,
+reusing the existing `LabelFormat` selector mechanism) lets an administrator configure
+a single, default clearance representing every federated peer, and have the plugin
+check a message's effective label against it, in addition to the always-checked
+server clearance. Confirmed with the user before implementation:
+
+- **A single default, not per-peer**: this increment adds exactly one clearance for
+  all peers, mirroring how the issue explicitly frames it as "for now, just a
+  default." There is still no notion of a specific remote domain having its own
+  clearance; see `doc/acdf-checks.md` for the full inventory of clearance/label
+  objects. Distinguishing clearances per remote domain is deferred (see "Deferred
+  features").
+- **Optional, off when unset**: unlike the mandatory server clearance, an empty
+  peer-clearance payload (the default) means the feature is inactive; every peer-
+  clearance check point (`PolicyConfiguration.hasPeerClearance`,
+  `checkDefaultPeerClearance`, `check(envelope, true)`, `checkPeerClearance(envelope)`)
+  is then a no-op, so existing deployments are unaffected until an administrator
+  configures one. When configured, it is parsed and validated against the loaded
+  policy exactly like the server clearance (`PolicyConfiguration`'s constructor
+  rejects a policy-invalid peer clearance at configuration time), but the default
+  label is *not* pre-validated against it at configuration time (only the server
+  clearance gates configuration; peer-clearance checks decide per message at ingress/
+  egress) so an administrator can knowingly configure a default label above what
+  every peer is cleared for and rely on stripping/warnings instead of being blocked
+  from saving.
+- **Ingress scope**: only messages arriving from a federated peer are checked, i.e.
+  `SecurityLabelInterceptor`'s existing inbound pre-processing hook additionally
+  tests `session instanceof IncomingServerSession`. A local client's message is
+  never checked against the peer clearance, even when one is configured. This
+  applies both to an explicit inbound label
+  (`PolicyConfiguration.check(envelope, true)`, which adds the peer-clearance ACDF
+  test right after the existing server-clearance test on the same decoded label)
+  and to an unlabelled message about to be stamped with the default
+  (`PolicyConfiguration.checkDefaultPeerClearance()`, run before the default is
+  attached).
+- **Egress scope**: only messages leaving through an `OutgoingServerSession` are
+  checked, matching the existing outbound default-label-stripping feature's scope
+  and the issue's "sending to another server" framing. `SecurityLabelInterceptor`
+  adds `checkPeerClearanceForFederation`, called before
+  `stripDefaultLabelForFederation` in the same `!incoming && !processed &&
+  session instanceof OutgoingServerSession` branch, so a message's *original*
+  label is what gets tested, even if the default-marking stripping feature would
+  otherwise remove it afterward. Like ingress, only a well-formed, single label
+  element is decoded (`PolicyConfiguration.checkPeerClearance(Element)`, which
+  reuses the same header-parsing rules as `check` but never re-runs server-
+  clearance authorization or stamps a default, since the message already passed
+  ingress); a missing/unconfigured snapshot, no configured peer clearance, an
+  absent label, or more than one label are all left unchecked here.
+- **Failure handling**: a denied or malformed label is handled by
+  `Settings.enforcementMode`, exactly like every existing label check: `ENFORCE`
+  rejects with a sanitized `forbidden` error (the same `reject` helper and reply
+  path used elsewhere), `WARN` logs a single-line warning (sender, recipient,
+  stanza ID, and the generic reason, never the body or label payload) and lets the
+  message through unchanged. There is no separate, independent on/off switch for
+  peer-clearance enforcement; it follows the one enforcement-mode knob the
+  administrator already controls for the server-clearance check.
+- **Configuration and persistence**: added as a ninth and tenth `Settings` record
+  component (`peerClearance`, `peerClearanceFormat`); a new eight-argument
+  convenience constructor preserves every existing call site, defaulting
+  `peerClearance` to `""` (unset) and `peerClearanceFormat` to `ESS` (unused while
+  unset). `JiveGlobalsConfigurationStore` persists/reads them as
+  `plugin.spiffing.settings.peerClearance`/`peerClearanceFormat`; a missing
+  `peerClearance` property reads as `""` and a missing `peerClearanceFormat`
+  defaults to `ESS`, so settings saved before this feature existed are unaffected.
+  `SettingsForm` and `spiffing-settings.jsp` expose both as a new "Peer clearance"
+  section (a format selector and an optional textarea), with the same
+  missing-field-means-unset convention.
+
 ## Label envelope and policy semantics
 
 Supported payloads inside `<label>` or `<equivalentlabel>`:
@@ -322,6 +394,20 @@ message objects. Coverage includes:
   after send (`processed`), with more than one label, or without a published
   configuration; plus the `defaultDisplayMarking()` accessor and the
   `SettingsForm`/JSP checkbox's missing-field-means-off convention.
+- Peer clearance: `PolicyConfiguration` rejects an invalid peer clearance at
+  configuration time, `hasPeerClearance()`/`checkDefaultPeerClearance()`/
+  `check(envelope, true)`/`checkPeerClearance(envelope)` are no-ops without one
+  configured, and each correctly permits a peer-clearance-allowed label while
+  rejecting one the peer clearance denies even though the server clearance
+  permits it. `SecurityLabelInterceptor` coverage includes: a federated inbound
+  labelled or unlabelled (default-stamped) message permitted or denied by the
+  peer clearance in both enforce (rejected) and warn (logged, unchanged) modes; a
+  local inbound message is never checked against the peer clearance even when one
+  is configured; an outbound message to another server is checked before the
+  default-label-stripping feature runs, in both enforce and warn modes; and the
+  egress check is a no-op without a configured peer clearance, for local
+  delivery, and after send (`processed`). Plus `SettingsForm`/JSP coverage of the
+  missing-fields-mean-unset convention for the new peer-clearance fields.
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
@@ -359,6 +445,14 @@ plugin assembly jar was built. Live server-to-server delivery through an actual
 by direct `SecurityLabelInterceptor.interceptPacket` calls with an
 `OutgoingServerSession` test double, matching this suite's existing approach for
 the inbound path. The 1.84 compatibility variant was not re-run in this session.
+
+After adding the default peer clearance, `mvn verify` was re-run in this session
+against the project's configured Bouncy Castle 1.78.1: **133 tests passed**, with
+no failures or skips, the Admin Console JSP compiled, and the plugin assembly jar
+was built. As with the existing federated-session tests, both ingress and egress
+peer-clearance coverage uses `IncomingServerSession`/`OutgoingServerSession` test
+doubles rather than a live federated pair. The 1.84 compatibility variant was not
+re-run in this session.
 
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
@@ -422,8 +516,10 @@ and escaped redisplay as `spiffing-settings.jsp`.
 
 ## Deferred features
 
-Per-user and per-room clearances; MUC history and recipient filtering; catalogue
-discovery for remote/federated entities; cross-policy translation; recursive
-forwarded-message handling; cluster configuration distribution; and live
-configuration reload from external file edits. Do not describe this increment
-as complete XEP-0258 support.
+Per-user and per-room clearances; a distinct clearance per specific federated
+peer/remote domain (today's peer clearance is a single default applied to every
+peer); MUC history and recipient filtering; catalogue discovery for remote/
+federated entities; cross-policy translation; recursive forwarded-message
+handling; cluster configuration distribution; and live configuration reload
+from external file edits. Do not describe this increment as complete XEP-0258
+support.

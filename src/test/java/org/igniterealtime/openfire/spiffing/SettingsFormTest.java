@@ -49,6 +49,24 @@ class SettingsFormTest {
         assertTrue(saved.get(0).stripDefaultLabelForFederation());
     }
 
+    @Test void missingPeerClearanceFieldsMeanNoPeerClearanceIsConfigured() {
+        // A form saved before this feature existed has neither field; both are optional.
+        List<Settings> saved = new ArrayList<>();
+        SettingsForm.save("POST", "token", "token", fields(), saved::add);
+        assertEquals("", saved.get(0).peerClearance());
+        assertEquals(LabelFormat.ESS, saved.get(0).peerClearanceFormat());
+    }
+
+    @Test void explicitPeerClearanceIsSaved() {
+        List<Settings> saved = new ArrayList<>();
+        var withPeerClearance = fields();
+        withPeerClearance.put("peerClearance", Fixtures.read("food-clearance-lactose-intolerant"));
+        withPeerClearance.put("peerClearanceFormat", "XML");
+        SettingsForm.save("POST", "token", "token", withPeerClearance, saved::add);
+        assertEquals(Fixtures.read("food-clearance-lactose-intolerant"), saved.get(0).peerClearance());
+        assertEquals(LabelFormat.XML, saved.get(0).peerClearanceFormat());
+    }
+
     @Test void missingOrInvalidFieldsCannotSave() {
         for (String key : fields().keySet()) {
             var missing = fields();

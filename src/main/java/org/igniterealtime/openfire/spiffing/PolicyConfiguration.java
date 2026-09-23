@@ -24,6 +24,8 @@ public final class PolicyConfiguration {
     private final Site site;
     private final Spif policy;
     private final Clearance clearance;
+    /** Null when no peer clearance is configured; ingress/egress peer-clearance checks are then no-ops. */
+    private final Clearance peerClearance;
     private final Label defaultLabel;
     private final Element defaultEnvelope;
     private final String defaultDisplayMarking;
@@ -40,6 +42,15 @@ public final class PolicyConfiguration {
             clearance = site.clearance(settings.clearanceFormat().decode(settings.clearance()), settings.clearanceFormat().format);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("The clearance is invalid or does not belong to the policy.");
+        }
+        if (settings.peerClearance().isEmpty()) {
+            peerClearance = null;
+        } else {
+            try {
+                peerClearance = site.clearance(settings.peerClearanceFormat().decode(settings.peerClearance()), settings.peerClearanceFormat().format);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("The peer clearance is invalid or does not belong to the policy.");
+            }
         }
         try {
             defaultLabel = site.label(settings.labelFormat().decode(settings.defaultLabel()), settings.labelFormat().format);
@@ -73,6 +84,9 @@ public final class PolicyConfiguration {
         return marking == null ? null : marking.getTextTrim();
     }
 
+    /** Whether an administrator has configured a peer clearance; if not, peer-clearance checks are no-ops. */
+    public boolean hasPeerClearance() { return peerClearance != null; }
+
     /**
      * Validates an arbitrary label payload against this policy and clearance and encodes it as a
      * XEP-0258 envelope, exactly like the default label. Used for label catalogue entries, which are
@@ -89,8 +103,17 @@ public final class PolicyConfiguration {
         return encode(label, format);
     }
 
-    /** Returns a stamped copy for an empty primary label; otherwise retains the original envelope. */
-    Element check(Element envelope) {
+    /** Returns a stamped copy for an empty primary label; otherwise retains the original envelope. Does not
+     * check the peer clearance; see {@link #check(Element, boolean)}. */
+    Element check(Element envelope) { return check(envelope, false); }
+
+    /**
+     * Same as {@link #check(Element)}, but when {@code checkPeerClearance} is {@code true} also tests the
+     * effective primary label against the configured peer clearance (a no-op when none is configured). Used
+     * for inbound messages arriving from a federated peer, in addition to the always-performed server
+     * clearance check.
+     */
+    Element check(Element envelope, boolean checkPeerClearance) {
         boundTree(envelope);
         if (!ENVELOPE.equals(envelope.getQName()) || !envelope.getTextTrim().isEmpty()) throw malformed();
         List<Element> children = envelope.elements();
@@ -105,6 +128,7 @@ public final class PolicyConfiguration {
         boolean useDefault = effective == null;
         if (useDefault) effective = defaultLabel;
         authorize(effective);
+        if (checkPeerClearance) authorizePeer(effective);
         while (index < children.size()) {
             Element other = children.get(index++);
             if (!named(other, "equivalentlabel")) throw malformed();
@@ -114,6 +138,37 @@ public final class PolicyConfiguration {
             if (!equivalent(effective, equivalent)) throw malformed();
         }
         return useDefault ? defaultEnvelope() : envelope;
+    }
+
+    /** Tests the already-validated default label against the configured peer clearance (a no-op when none is
+     * configured). Used when an inbound message from a federated peer arrives without a label and is about
+     * to be stamped with the default. */
+    void checkDefaultPeerClearance() { authorizePeer(defaultLabel); }
+
+    /**
+     * Decodes an outbound envelope's primary label and tests it against the configured peer clearance (a
+     * no-op when none is configured). Unlike {@link #check}, this never re-runs server-clearance
+     * authorization (already done on ingress) or stamps a default; it is used only for the egress
+     * peer-clearance check before a message leaves for another server.
+     */
+    void checkPeerClearance(Element envelope) {
+        if (peerClearance == null) return;
+        authorizePeer(decode(envelope));
+    }
+
+    private Label decode(Element envelope) {
+        boundTree(envelope);
+        if (!ENVELOPE.equals(envelope.getQName()) || !envelope.getTextTrim().isEmpty()) throw malformed();
+        List<Element> children = envelope.elements();
+        int index = 0;
+        if (!children.isEmpty() && named(children.get(0), "displaymarking")) {
+            if (!children.get(0).elements().isEmpty()) throw malformed();
+            index++;
+        }
+        if (index >= children.size() || !named(children.get(index), "label")) throw malformed();
+        Element primary = children.get(index);
+        Label effective = contained(primary, true);
+        return effective == null ? defaultLabel : effective;
     }
 
     private Label contained(Element holder, boolean allowEmpty) {
@@ -143,6 +198,11 @@ public final class PolicyConfiguration {
     private void authorize(Label label) {
         policy.assertValid(label);
         if (!policy.acdf(label, clearance)) throw new IllegalArgumentException("Label denied by server clearance.");
+    }
+
+    private void authorizePeer(Label label) {
+        if (peerClearance == null) return;
+        if (!policy.acdf(label, peerClearance)) throw new IllegalArgumentException("Label denied by peer clearance.");
     }
 
     private static boolean equivalent(Label first, Label second) {

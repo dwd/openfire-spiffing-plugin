@@ -28,7 +28,12 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
             EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
             // Properties saved before this switch existed have none; default to not stripping.
             boolean stripDefaultLabelForFederation = JiveGlobals.getBooleanProperty(PREFIX + "stripDefaultLabelForFederation", false);
-            return new Settings(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode, stripDefaultLabelForFederation);
+            // Properties saved before this switch existed have none; default to no configured peer clearance.
+            String peerClearance = JiveGlobals.getProperty(PREFIX + "peerClearance", "");
+            String peerClearanceFormatName = JiveGlobals.getProperty(PREFIX + "peerClearanceFormat");
+            LabelFormat peerClearanceFormat = peerClearanceFormatName == null ? LabelFormat.ESS : LabelFormat.valueOf(peerClearanceFormatName);
+            return new Settings(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode,
+                stripDefaultLabelForFederation, peerClearance, peerClearanceFormat);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Stored Spiffing settings are incomplete or corrupted.", e);
         }
@@ -44,6 +49,8 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
         JiveGlobals.setProperty(PREFIX + "outputFormat", settings.outputFormat().name());
         JiveGlobals.setProperty(PREFIX + "enforcementMode", settings.enforcementMode().name());
         JiveGlobals.setProperty(PREFIX + "stripDefaultLabelForFederation", Boolean.toString(settings.stripDefaultLabelForFederation()));
+        JiveGlobals.setProperty(PREFIX + "peerClearance", settings.peerClearance());
+        JiveGlobals.setProperty(PREFIX + "peerClearanceFormat", settings.peerClearanceFormat().name());
     }
 
     private static String require(String key) {

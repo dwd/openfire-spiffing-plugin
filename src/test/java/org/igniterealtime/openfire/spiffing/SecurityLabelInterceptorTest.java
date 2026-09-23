@@ -264,4 +264,119 @@ class SecurityLabelInterceptorTest {
         strippingInterceptor.interceptPacket(duplicated, outgoingServerSession(), false, false);
         assertEquals(beforeDuplicated, duplicated.toXML());
     }
+
+    private static org.jivesoftware.openfire.session.IncomingServerSession incomingServerSession() {
+        return (org.jivesoftware.openfire.session.IncomingServerSession) java.lang.reflect.Proxy.newProxyInstance(
+            SecurityLabelInterceptorTest.class.getClassLoader(),
+            new Class<?>[]{org.jivesoftware.openfire.session.IncomingServerSession.class},
+            (proxy, method, args) -> { throw new AssertionError("Peer clearance checking must not depend on session state"); });
+    }
+
+    @Test void federatedInboundLabelPermittedByPeerClearanceIsAccepted() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        peerInterceptor.interceptPacket(message, incomingServerSession(), true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void federatedInboundLabelDeniedByPeerClearanceIsRejectedInEnforceMode() {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        assertThrows(PacketRejectedException.class, () -> peerInterceptor.interceptPacket(message, incomingServerSession(), true, false));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void federatedInboundLabelDeniedByPeerClearanceIsWarnedAboutInWarnMode() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.WARN));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        peerInterceptor.interceptPacket(message, incomingServerSession(), true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void localInboundIsNotCheckedAgainstPeerClearanceEvenWhenConfigured() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        peerInterceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void unlabelledFederatedInboundIsCheckedAgainstPeerClearanceBeforeStampingDefault() {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        assertThrows(PacketRejectedException.class, () -> peerInterceptor.interceptPacket(message, incomingServerSession(), true, false));
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void egressLabelPermittedByPeerClearanceIsSentUnchanged() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        peerInterceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void egressLabelDeniedByPeerClearanceIsRejectedInEnforceMode() {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        assertThrows(PacketRejectedException.class, () -> peerInterceptor.interceptPacket(message, outgoingServerSession(), false, false));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void egressLabelDeniedByPeerClearanceIsWarnedAboutAndLeavesUnchangedInWarnMode() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.WARN));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        peerInterceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void egressPeerClearanceCheckIsANoOpWithoutAConfiguredPeerClearance() throws Exception {
+        var message = message(); // `configuration` fixture has no peer clearance configured
+        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.XML)); // denied by the server clearance
+        String before = message.toXML();
+        interceptor.interceptPacket(message, outgoingServerSession(), false, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void egressPeerClearanceCheckIsSkippedForLocalDeliveryAndAfterProcessed() throws Exception {
+        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
+        var localMessage = message();
+        localMessage.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String beforeLocal = localMessage.toXML();
+        peerInterceptor.interceptPacket(localMessage, null, false, false);
+        assertEquals(beforeLocal, localMessage.toXML());
+
+        var afterSend = message();
+        afterSend.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String beforeAfterSend = afterSend.toXML();
+        peerInterceptor.interceptPacket(afterSend, outgoingServerSession(), false, true);
+        assertEquals(beforeAfterSend, afterSend.toXML());
+        assertTrue(replies.isEmpty());
+    }
 }
