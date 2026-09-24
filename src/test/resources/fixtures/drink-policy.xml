@@ -1,0 +1,21 @@
+<SPIF>
+	<securityPolicyId name="Drink" id="1.2.826.0.1.6726289.0.1"/>
+	<equivalentPolicies>
+		<equivalentPolicy id="1.2.826.0.1.6726289.0.0" name="Food"/>
+	</equivalentPolicies>
+	<securityClassifications>
+		<securityClassification name="House Wine" color="red" lacv="10" hierarchy="0" obsolete="false">
+			<equivalentClassification policyRef="Food" lacv="52" applied="both"/>
+		</securityClassification>
+		<securityClassification name="House Beer" color="amber" lacv="11" hierarchy="1" obsolete="false"/>
+	</securityClassifications>
+	<securityCategoryTagSets>
+		<securityCategoryTagSet name="Drink Flavours" id="1.2.826.0.1.6726289.0.1.1">
+			<securityCategoryTag name="Flavour" tagType="permissive">
+				<tagCategory name="Sweet" lacv="0">
+					<equivalentSecCategoryTag policyRef="Food" tagSetId="1.2.826.0.1.6726289.0.0.1" tagType="permissive" lacv="3"/>
+				</tagCategory>
+			</securityCategoryTag>
+		</securityCategoryTagSet>
+	</securityCategoryTagSets>
+</SPIF>

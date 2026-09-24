@@ -34,26 +34,33 @@ public final class PolicyConfiguration {
         this.settings = settings;
         site = new Site();
         try {
-            policy = site.load(settings.policy());
+            Spif primary = null;
+            for (String p : settings.policies()) {
+                Spif loaded = site.load(p);
+                if (primary == null) primary = loaded;
+            }
+            policy = primary;
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("The policy is not a valid Open XML SPIF.");
+            throw new IllegalArgumentException("A policy is not a valid Open XML SPIF, or duplicates another loaded policy.");
         }
         try {
             clearance = site.clearance(settings.clearanceFormat().decode(settings.clearance()), settings.clearanceFormat().format);
+            if (clearance.policy() != policy) throw new IllegalArgumentException();
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("The clearance is invalid or does not belong to the policy.");
+            throw new IllegalArgumentException("The clearance is invalid or does not belong to the primary policy.");
         }
         if (settings.peerClearance().isEmpty()) {
             peerClearance = null;
         } else {
             try {
                 peerClearance = site.clearance(settings.peerClearanceFormat().decode(settings.peerClearance()), settings.peerClearanceFormat().format);
+                if (peerClearance.policy() != policy) throw new IllegalArgumentException();
             } catch (RuntimeException e) {
-                throw new IllegalArgumentException("The peer clearance is invalid or does not belong to the policy.");
+                throw new IllegalArgumentException("The peer clearance is invalid or does not belong to the primary policy.");
             }
         }
         try {
-            defaultLabel = site.label(settings.labelFormat().decode(settings.defaultLabel()), settings.labelFormat().format);
+            defaultLabel = toPrimary(site.label(settings.labelFormat().decode(settings.defaultLabel()), settings.labelFormat().format));
             authorize(defaultLabel);
             defaultEnvelope = encode(defaultLabel, settings.outputFormat());
             defaultDisplayMarking = displayMarking(defaultEnvelope);
@@ -95,7 +102,7 @@ public final class PolicyConfiguration {
     public Element encodeCatalogLabel(String payload, LabelFormat format) {
         Label label;
         try {
-            label = site.label(format.decode(payload), format.format);
+            label = toPrimary(site.label(format.decode(payload), format.format));
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("The label is not valid input for the selected format.");
         }
@@ -126,15 +133,17 @@ public final class PolicyConfiguration {
         Element primary = children.get(index++);
         Label effective = contained(primary, true);
         boolean useDefault = effective == null;
-        if (useDefault) effective = defaultLabel;
+        effective = useDefault ? defaultLabel : toPrimary(effective);
         authorize(effective);
         if (checkPeerClearance) authorizePeer(effective);
         while (index < children.size()) {
             Element other = children.get(index++);
             if (!named(other, "equivalentlabel")) throw malformed();
-            Label equivalent = contained(other, false);
+            Label equivalent = toPrimary(contained(other, false));
             authorize(equivalent);
-            // One configured policy: never trust an unverified cross-policy equivalence claim.
+            // A label from a different loaded policy is only trusted here once translated to the primary
+            // policy via that policy's own declared equivalence mappings (see toPrimary); this still never
+            // trusts an unverified cross-policy equivalence claim from the label itself.
             if (!equivalent(effective, equivalent)) throw malformed();
         }
         return useDefault ? defaultEnvelope() : envelope;
@@ -168,7 +177,7 @@ public final class PolicyConfiguration {
         if (index >= children.size() || !named(children.get(index), "label")) throw malformed();
         Element primary = children.get(index);
         Label effective = contained(primary, true);
-        return effective == null ? defaultLabel : effective;
+        return effective == null ? defaultLabel : toPrimary(effective);
     }
 
     private Label contained(Element holder, boolean allowEmpty) {
@@ -208,6 +217,23 @@ public final class PolicyConfiguration {
     private static boolean equivalent(Label first, Label second) {
         return first.policy() == second.policy() && first.classification() == second.classification()
             && first.categories().equals(second.categories());
+    }
+
+    /**
+     * Translates a label from a secondary loaded policy to the primary policy, so the single configured
+     * clearance can still authorize it; a label already under the primary policy is returned unchanged.
+     * Translation relies exclusively on the label's own policy's declared {@code equivalentPolicy}/
+     * {@code equivalentClassification}/{@code equivalentSecCategoryTag} mappings (a trusted, policy-authored
+     * equivalence, not a claim made by the message itself); a policy without such a mapping for its
+     * classification or any of its categories fails translation and the label is rejected as unsupported.
+     */
+    private Label toPrimary(Label label) {
+        if (label.policy() == policy) return label;
+        try {
+            return label.encrypt(policy.policyId(), site);
+        } catch (RuntimeException e) {
+            throw malformed();
+        }
     }
 
     private Element encode(Label label, LabelFormat format) {

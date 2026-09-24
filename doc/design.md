@@ -14,7 +14,11 @@ optional default peer clearance, checked on federated ingress and egress, was
 added September 23, 2026 (see "Peer clearance" below). A never-configured
 plugin (no policy, default label, or server clearance ever saved) now fails
 open instead of closed, added September 24, 2026 (see "Fail-open when never
-configured" below); `doc/acdf-checks.md` was updated accordingly.
+configured" below); `doc/acdf-checks.md` was updated accordingly. Support for
+loading multiple policies into one registry, with cross-policy label
+translation via each policy's own declared equivalence mappings, was added
+September 24, 2026 (see "Multiple policies" below); `doc/acdf-checks.md` was
+updated accordingly.
 
 ## Objective and confirmed requirements
 
@@ -51,8 +55,9 @@ and one output format. It serializes these as a versioned XML document, with the
 input documents escaped as text. The Admin Console accepts payloads, not full
 XEP-0258 envelopes. ESS inputs are base64 ASN.1; XML inputs are literal XML.
 
-`PolicyConfiguration` creates a private Spiffing `Site`, loads exactly one policy,
-and parses the clearance and default label against that same registry. It calls
+`PolicyConfiguration` creates a private Spiffing `Site` and loads one or more
+policies into it (see "Multiple policies" below), then parses the clearance and
+default label against the first (primary) loaded policy in that same registry. It calls
 both `Spif.assertValid(label)` and `Spif.acdf(label, clearance)`. Spiffing's ACDF
 does not imply policy validity; the two checks are intentionally independent.
 It encodes a default envelope with a policy-derived display marking, parses it
@@ -319,6 +324,73 @@ server clearance. Confirmed with the user before implementation:
   section (a format selector and an optional textarea), with the same
   missing-field-means-unset convention.
 
+## Multiple policies
+
+Administrators may now load more than one Open XML SPIF policy document into
+the same private Spiffing `Site` registry (`Settings.policies()`, an ordered,
+validated, non-empty list, replacing the previous single `Settings.policy`
+field). Confirmed with the user before implementation, choosing among several
+possible interpretations of "allow multiple policies to be loaded":
+
+- **One registry, not independent configurations**: all loaded policies share
+  the plugin's single `PolicyConfiguration`, `Site`, server clearance, peer
+  clearance, default label, and enforcement mode; this is not a mechanism for
+  running several unrelated per-domain or per-purpose configurations side by
+  side (that remains a possible future direction, not this increment).
+- **A single primary policy for the clearance and default label**: the first
+  entry in `Settings.policies()` is the *primary* policy. The mandatory server
+  clearance, the optional peer clearance, and the default label are all still
+  validated against it alone, exactly as when only one policy could be
+  loaded; `PolicyConfiguration`'s constructor now explicitly rejects a
+  clearance or peer clearance encoded under a different, non-primary loaded
+  policy, rather than silently doing nothing useful with it. This was chosen
+  over asking the administrator to configure one clearance per loaded policy,
+  since Spiffing's `Spif.acdf` already requires an exact policy match between
+  a label and the clearance checking it, so a single clearance can only ever
+  decide access for one policy's labels at a time; secondary policies exist to
+  widen which *labels* are recognized, not to add independent access-control
+  decisions.
+- **Cross-policy trust via each policy's own declared equivalence, not a
+  plugin-invented comparison**: a message's primary label, an
+  `<equivalentlabel/>`, or a label catalogue entry may be encoded under any
+  loaded policy, not just the primary one. Before such a label is authorized
+  (or compared to another decoded label), `PolicyConfiguration.toPrimary`
+  translates it to the primary policy using `Label.encrypt`/`Spif.translate`,
+  which follows the SPIF's own `equivalentPolicies`/`equivalentClassification`/
+  `equivalentSecCategoryTag` declarations — a trusted, policy-authored mapping,
+  not a claim made by the message itself. A policy without such a declared
+  mapping for its classification or any of its label's categories fails
+  translation, and the label is rejected as unsupported, exactly like any
+  other malformed or unrecognized label. This directly resolves the previous
+  "Label envelope and policy semantics" section's stated limitation ("With
+  only one configured policy... Future cross-policy support needs trusted
+  equivalence mappings and explicit policy registry management") using
+  Spiffing's own existing, standards-based translation mechanism, rather than
+  inventing a new one; a label already under the primary policy is returned
+  unchanged (`toPrimary` is then a no-op), so single-policy behavior is
+  unaffected.
+- **Admin Console**: `spiffing-settings.jsp` replaces the single policy
+  textarea with a repeatable list (one `<textarea name="policy">` per loaded
+  policy, submitted as repeated same-named fields). "Add another policy" and
+  per-row "Remove this policy" buttons redisplay the form with one more/fewer
+  row without saving (at least one policy is always required, so the last row
+  cannot be removed); only the actual "Save settings" button invokes
+  `SettingsForm.save`. The first row is labelled as the primary policy.
+- **Configuration and persistence**: `SettingsForm` gained a second `save`
+  overload taking an explicit `List<String> policies` parameter (used by the
+  updated JSP); the original `Map`-only overload is preserved unchanged for
+  every existing caller, internally wrapping the map's single `"policy"` field
+  into a one-element list. `Settings` keeps its familiar single-policy
+  constructors and a `policy()` convenience accessor (the primary policy)
+  alongside the new list-based ones, so no existing call site needed to
+  change. `JiveGlobalsConfigurationStore` persists the list using
+  `JiveGlobals`' own list-property support (`setProperty(String, List)`/
+  `getProperties(String)`), which stores each entry as an ordered child
+  property and replaces every child on each save (no stale entries when the
+  list shrinks); settings saved before this feature existed have a single
+  scalar `policy` property with no children, which `read()` falls back to,
+  and the next save migrates to the list-based form.
+
 ## Label envelope and policy semantics
 
 Supported payloads inside `<label>` or `<equivalentlabel>`:
@@ -335,15 +407,18 @@ its embedded schema inconsistently makes the display marking mandatory. Display
 markings are presentation, never authorization inputs. Existing authorized
 markings are preserved; generated defaults use Spiffing's marking.
 
-With only one configured policy, equivalent labels must independently parse,
-validate, pass access control, and represent the same classification/categories
-under that policy. Foreign-policy equivalents and unknown primary policies are
-rejected. This is a deliberately restricted profile: the broader XEP permits
+Equivalent labels must independently parse, validate, pass access control, and
+represent the same classification/categories as the primary label once both are
+resolved to the primary policy (see "Multiple policies" above for how a label
+under a secondary loaded policy is translated there first). A primary label or
+equivalent naming a policy that is not loaded at all is rejected, as is one
+naming a loaded policy that lacks a declared translation to the primary policy.
+This remains a deliberately restricted profile: the broader XEP permits
 selecting an appropriate equivalent label and default fallback when no applicable
-label exists. We do not trust unverifiable equivalence claims or silently replace
-an explicit unsupported security label with a potentially less restrictive one.
-Future cross-policy support needs trusted equivalence mappings and explicit policy
-registry management.
+label exists. We do not trust unverifiable equivalence claims made by the message
+itself or silently replace an explicit unsupported security label with a
+potentially less restrictive one; cross-policy trust comes only from a policy's
+own declared equivalence mappings, never from the label.
 
 Spiffing requires explicit classification membership. Hierarchy does not grant
 access to lower classifications. Restrictive categories require all applicable
@@ -463,6 +538,19 @@ message objects. Coverage includes:
   egress check is a no-op without a configured peer clearance, for local
   delivery, and after send (`processed`). Plus `SettingsForm`/JSP coverage of the
   missing-fields-mean-unset convention for the new peer-clearance fields.
+- Multiple policies: a two-policy fixture (`drink-policy.xml`, declaring an
+  `equivalentPolicies` mapping back to the existing `food-policy.xml`) exercises
+  loading several policies into one registry, a primary-policy label passing
+  through unchanged, a secondary-policy primary label and equivalent label each
+  translated and correctly permitted, a secondary-policy label lacking a
+  declared equivalence correctly rejected, a genuinely mismatched translated
+  equivalent correctly rejected, catalogue-label translation, a clearance
+  encoded under a non-primary loaded policy correctly rejected at configuration
+  time, and duplicate policies rejected. `SettingsTest`/`SettingsFormTest` cover
+  the new policy-list validation (empty, too many, blank/oversized entries,
+  defensive copying) and the new multi-policy `SettingsForm.save` overload
+  (ordering, CSRF enforcement, empty-list rejection) alongside every
+  pre-existing single-policy constructor/accessor/form call site, unchanged.
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
@@ -516,6 +604,15 @@ since new coverage for the never-configured/corrupted distinction replaced
 what had been a single, now-split, missing-configuration scenario), the Admin
 Console JSP compiled, and the plugin assembly jar was built. The 1.84
 compatibility variant was not re-run in this session.
+
+After adding multiple-policy support, `mvn verify` was re-run in this session
+against the project's configured Bouncy Castle 1.78.1: **154 tests passed**,
+with no failures or skips, the updated Admin Console JSP (the repeatable policy
+list) compiled, and the plugin assembly jar was built. Live add/remove-row
+interaction with the new Admin Console list was not exercised by a browser
+automation test, only the underlying `SettingsForm.save`/`Settings` validation
+and the JSP's own compilation. The 1.84 compatibility variant was not re-run in
+this session.
 
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
@@ -581,8 +678,10 @@ and escaped redisplay as `spiffing-settings.jsp`.
 
 Per-user and per-room clearances; a distinct clearance per specific federated
 peer/remote domain (today's peer clearance is a single default applied to every
-peer); MUC history and recipient filtering; catalogue discovery for remote/
-federated entities; cross-policy translation; recursive forwarded-message
+peer); a distinct server clearance or default label per loaded policy (today's
+clearance and default label are both scoped to a single primary policy, even
+when multiple policies are loaded); MUC history and recipient filtering;
+catalogue discovery for remote/federated entities; recursive forwarded-message
 handling; cluster configuration distribution; and live configuration reload
 from external file edits. Do not describe this increment as complete XEP-0258
 support.

@@ -90,4 +90,26 @@ class SettingsFormTest {
         assertEquals(0, store.writes);
         assertNull(service.current());
     }
+
+    private Map<String, String> fieldsWithoutPolicy() {
+        var fields = fields();
+        fields.remove("policy");
+        return fields;
+    }
+
+    @Test void multiplePoliciesOverloadSavesEveryPolicyInOrder() {
+        List<Settings> saved = new ArrayList<>();
+        var policies = List.of(Fixtures.read("food-policy"), Fixtures.read("drink-policy"));
+        SettingsForm.save("POST", "token", "token", policies, fieldsWithoutPolicy(), saved::add);
+        assertEquals(policies, saved.get(0).policies());
+    }
+
+    @Test void multiplePoliciesOverloadStillEnforcesCsrf() {
+        var policies = List.of(Fixtures.read("food-policy"));
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "wrong", policies, fieldsWithoutPolicy(), s -> fail("must not save")));
+    }
+
+    @Test void emptyMultiplePoliciesListCannotSave() {
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", List.of(), fieldsWithoutPolicy(), s -> fail("must not save")));
+    }
 }

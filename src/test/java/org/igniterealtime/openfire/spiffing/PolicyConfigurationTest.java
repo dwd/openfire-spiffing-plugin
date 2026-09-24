@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -230,5 +231,87 @@ class PolicyConfigurationTest {
         assertDoesNotThrow(() -> permissive.checkPeerClearance(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML)));
         var restrictive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
         assertThrows(RuntimeException.class, () -> restrictive.checkPeerClearance(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML)));
+    }
+
+    private static Element foodSpiffyLabel(String classificationLacv, String tagLacv) {
+        return Fixtures.xml("<label xmlns='http://surevine.com/xmlns/spiffy'>" +
+            "<policy id='1.2.826.0.1.6726289.0.0'>Food</policy>" +
+            "<classification lacv='" + classificationLacv + "'>Luxury</classification>" +
+            "<tag type='permissive' id='1.2.826.0.1.6726289.0.0.1' lacv='" + tagLacv + "'>Sweet</tag></label>");
+    }
+
+    private static Element drinkSpiffyLabel(String classificationLacv, String tagLacv) {
+        String tag = tagLacv == null ? "" : "<tag type='permissive' id='1.2.826.0.1.6726289.0.1.1' lacv='" + tagLacv + "'>Sweet</tag>";
+        return Fixtures.xml("<label xmlns='http://surevine.com/xmlns/spiffy'>" +
+            "<policy id='1.2.826.0.1.6726289.0.1'>Drink</policy>" +
+            "<classification lacv='" + classificationLacv + "'>House Wine</classification>" + tag + "</label>");
+    }
+
+    @Test void loadsMultiplePoliciesIntoOneRegistry() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        // The primary (food) policy still checks exactly as before.
+        Element envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        assertSame(envelope, configuration.check(envelope));
+    }
+
+    @Test void permitsAPrimaryLabelFromASecondLoadedPolicyViaDeclaredTranslation() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var envelope = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/></securitylabel>");
+        envelope.elements().get(0).add(drinkSpiffyLabel("10", "0"));
+        assertSame(envelope, configuration.check(envelope));
+    }
+
+    @Test void rejectsALabelFromASecondLoadedPolicyWithoutADeclaredEquivalence() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var envelope = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/></securitylabel>");
+        // "House Beer" (lacv 11) has no equivalentClassification back to the primary policy.
+        envelope.elements().get(0).add(drinkSpiffyLabel("11", null));
+        assertThrows(RuntimeException.class, () -> configuration.check(envelope));
+    }
+
+    @Test void permitsAnEquivalentLabelFromASecondLoadedPolicyViaDeclaredTranslation() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var envelope = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/><equivalentlabel/></securitylabel>");
+        envelope.elements().get(0).add(foodSpiffyLabel("52", "3"));
+        envelope.elements().get(1).add(drinkSpiffyLabel("10", "0"));
+        assertSame(envelope, configuration.check(envelope));
+    }
+
+    @Test void rejectsAFalseEquivalentLabelFromASecondLoadedPolicy() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var envelope = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/><equivalentlabel/></securitylabel>");
+        // A permitted food label with an extra category ("Sweet" and "Chocolate") does not equal the drink
+        // equivalent, which only translates to "Sweet" alone; both are independently valid and permitted,
+        // but their decoded category sets differ.
+        Element primary = Fixtures.xml("<label xmlns='http://surevine.com/xmlns/spiffy'>" +
+            "<policy id='1.2.826.0.1.6726289.0.0'>Food</policy><classification lacv='52'>Luxury</classification>" +
+            "<tag type='permissive' id='1.2.826.0.1.6726289.0.0.1' lacv='3'>Sweet</tag>" +
+            "<tag type='permissive' id='1.2.826.0.1.6726289.0.0.1' lacv='6'>Chocolate</tag></label>");
+        envelope.elements().get(0).add(primary);
+        envelope.elements().get(1).add(drinkSpiffyLabel("10", "0")); // translates to Luxury+Sweet only
+        assertThrows(RuntimeException.class, () -> configuration.check(envelope));
+    }
+
+    @Test void catalogLabelFromASecondLoadedPolicyIsTranslatedAndValidated() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        String payload = drinkSpiffyLabel("10", "0").asXML();
+        assertDoesNotThrow(() -> configuration.encodeCatalogLabel(payload, LabelFormat.XML));
+        String denied = drinkSpiffyLabel("11", null).asXML();
+        assertThrows(IllegalArgumentException.class, () -> configuration.encodeCatalogLabel(denied, LabelFormat.XML));
+    }
+
+    @Test void clearanceMustBelongToThePrimaryPolicy() {
+        var s = Fixtures.settingsWithSecondPolicy();
+        // Encode the clearance under the (loaded) secondary policy instead of the primary one.
+        String drinkClearance = "<clearance xmlns='http://surevine.com/xmlns/spiffy'>" +
+            "<policy id='1.2.826.0.1.6726289.0.1'>Drink</policy><classification lacv='10'>House Wine</classification></clearance>";
+        assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(s.policies(), drinkClearance, LabelFormat.XML,
+            s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode())));
+    }
+
+    @Test void rejectsDuplicatePolicies() {
+        var s = Fixtures.settingsWithSecondPolicy();
+        assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(
+            List.of(s.policy(), s.policy()), s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat())));
     }
 }

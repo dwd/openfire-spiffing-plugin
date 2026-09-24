@@ -2,6 +2,8 @@ package org.igniterealtime.openfire.spiffing;
 
 import org.jivesoftware.util.JiveGlobals;
 
+import java.util.List;
+
 /**
  * Persists settings as individual Openfire properties (backed by the {@code ofProperty} database
  * table, or the standalone XML properties file outside a database installation), the usual idiom for
@@ -9,14 +11,25 @@ import org.jivesoftware.util.JiveGlobals;
  * previous file-based store, a save is not a single atomic operation: a failure partway through
  * {@link #write} can leave a mix of old and new field values, and {@code JiveGlobals} itself does not
  * surface every underlying persistence failure to the caller.
+ * <p>
+ * The policy list is persisted using {@code JiveGlobals}' own list-property support
+ * ({@link JiveGlobals#setProperty(String, List)}/{@link JiveGlobals#getProperties(String)}), which stores
+ * each entry as its own ordered child property and replaces every child on each save, so a shrinking list
+ * never leaves stale entries behind. Settings saved before multiple policies were supported instead have a
+ * single scalar {@code policy} property with no children; {@link #read()} falls back to that value, and the
+ * first subsequent {@link #write} migrates it to the list-based form.
  */
 final class JiveGlobalsConfigurationStore implements ConfigurationService.Store {
     private static final String PREFIX = "plugin.spiffing.settings.";
 
     @Override
     public Settings read() {
-        String policy = JiveGlobals.getProperty(PREFIX + "policy");
-        if (policy == null) return null;
+        List<String> policies = JiveGlobals.getProperties(PREFIX + "policy");
+        if (policies.isEmpty()) {
+            String legacyPolicy = JiveGlobals.getProperty(PREFIX + "policy");
+            if (legacyPolicy == null) return null;
+            policies = List.of(legacyPolicy);
+        }
         try {
             String clearance = require("clearance");
             LabelFormat clearanceFormat = LabelFormat.valueOf(require("clearanceFormat"));
@@ -32,7 +45,7 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
             String peerClearance = JiveGlobals.getProperty(PREFIX + "peerClearance", "");
             String peerClearanceFormatName = JiveGlobals.getProperty(PREFIX + "peerClearanceFormat");
             LabelFormat peerClearanceFormat = peerClearanceFormatName == null ? LabelFormat.ESS : LabelFormat.valueOf(peerClearanceFormatName);
-            return new Settings(policy, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode,
+            return new Settings(policies, clearance, clearanceFormat, defaultLabel, labelFormat, outputFormat, enforcementMode,
                 stripDefaultLabelForFederation, peerClearance, peerClearanceFormat);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("Stored Spiffing settings are incomplete or corrupted.", e);
@@ -41,7 +54,7 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
 
     @Override
     public void write(Settings settings) {
-        JiveGlobals.setProperty(PREFIX + "policy", settings.policy());
+        JiveGlobals.setProperty(PREFIX + "policy", settings.policies());
         JiveGlobals.setProperty(PREFIX + "clearance", settings.clearance());
         JiveGlobals.setProperty(PREFIX + "clearanceFormat", settings.clearanceFormat().name());
         JiveGlobals.setProperty(PREFIX + "defaultLabel", settings.defaultLabel());

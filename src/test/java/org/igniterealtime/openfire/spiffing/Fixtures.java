@@ -4,6 +4,7 @@ import io.cridland.spiffing.Site;
 import org.dom4j.Element;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.List;
 
 final class Fixtures {
     static String read(String name) {
@@ -31,6 +32,14 @@ final class Fixtures {
         return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
             read("food-label-milk-chocolate"), LabelFormat.XML, LabelFormat.ESS, enforcementMode, false,
             read(peerClearanceFixture), LabelFormat.XML);
+    }
+
+    /** A configuration loading two policies: the primary "food" policy (used for the clearance and default
+     * label, unchanged from {@link #settings()}), plus a second "drink" policy that declares an equivalence
+     * back to it, for testing cross-policy label translation. */
+    static Settings settingsWithSecondPolicy() {
+        return new Settings(List.of(read("food-policy"), read("drink-policy")), read("food-clearance-all-okay"), LabelFormat.XML,
+            read("food-label-milk-chocolate"), LabelFormat.XML, LabelFormat.ESS, EnforcementMode.ENFORCE, false);
     }
 
     static Element envelope(String fixture, LabelFormat format) {

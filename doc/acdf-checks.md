@@ -19,7 +19,13 @@ There are up to **two** clearance objects in this plugin, and both belong to
   access-control decision input (`Spif.acdf(label, clearance)`) for **every**
   label the plugin evaluates: inbound messages regardless of origin (local
   client or federated peer), the administrator-configured default label, and
-  every label catalogue entry (`PolicyConfiguration.encodeCatalogLabel`).
+  every label catalogue entry (`PolicyConfiguration.encodeCatalogLabel`). Since
+  multiple policies can be loaded (`doc/design.md`'s "Multiple policies"
+  section), the clearance always belongs to exactly one of them, the *primary*
+  policy (`Settings.policies().get(0)`); a label decoded under a different,
+  secondary loaded policy is translated to the primary policy
+  (`PolicyConfiguration.toPrimary`) before this same `acdf` call, so there is
+  still only ever one clearance object and one `acdf` decision per label.
 - `Settings.peerClearance` (with `Settings.peerClearanceFormat`) is an
   **optional**, administrator-configured payload representing a single default
   clearance for every federated peer (see `doc/design.md`'s "Peer clearance"
@@ -84,8 +90,15 @@ or the underlying Spiffing `Label`), each with its own lifecycle:
   is omitted from the published `<catalog/>`, not rejected outright.
 - **Equivalent labels**: `<equivalentlabel/>` children of an inbound envelope
   are also individually decoded, validated, and access-checked
-  (`PolicyConfiguration.check`), though they never replace the primary label
-  and only need to be equivalent to it under the one configured policy.
+  (`PolicyConfiguration.check`), though they never replace the primary label.
+  An equivalent label under the primary policy is compared to the primary
+  label directly; one under a secondary loaded policy is first translated to
+  the primary policy (`toPrimary`, using that policy's own declared
+  `equivalentPolicy`/`equivalentClassification`/`equivalentSecCategoryTag`
+  mappings) and only then compared. Either way, the label is only accepted if
+  it ends up with the same classification and category set as the primary
+  label under the primary policy; an unverified cross-policy equivalence claim
+  made by the message itself is never trusted.
 
 There is no notion of a label belonging to a server, a peer, a room, or a
 user as a standing property — a label is always attached to one specific
@@ -128,9 +141,11 @@ processes the packet) does the following, for every non-error message:
 4. **A single labelled envelope is validated and access-checked exactly
    once against the server clearance, plus once more against the peer
    clearance for federated senders.** `PolicyConfiguration.check` bounds the
-   XML tree, decodes the primary label (and any equivalent labels) under the
-   configured policy, and calls `assertValid` + `acdf` against the server
-   clearance. When the message arrived via an `IncomingServerSession`, the
+   XML tree, decodes the primary label (and any equivalent labels) under
+   whichever loaded policy the label itself declares, translates it to the
+   primary policy first if it named a different, secondary loaded policy, and
+   calls `assertValid` + `acdf` against the server clearance. When the message
+   arrived via an `IncomingServerSession`, the
    same decoded effective label is also tested with `acdf` against the peer
    clearance (via `check`'s `checkPeerClearance` boolean parameter, a no-op
    without one configured); equivalent labels are **not** re-tested
