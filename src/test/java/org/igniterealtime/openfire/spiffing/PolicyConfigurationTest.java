@@ -323,4 +323,30 @@ class PolicyConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> new PolicyConfiguration(new Settings(
             List.of(s.policy(), s.policy()), s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat())));
     }
+
+    @Test void loadedPoliciesListsEveryLoadedPolicyInLoadOrderWithItsOriginalDocument() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var loaded = configuration.loadedPolicies();
+        assertEquals(2, loaded.size());
+        assertEquals("1.2.826.0.1.6726289.0.0", loaded.get(0).id());
+        assertEquals("Food", loaded.get(0).name());
+        assertEquals(Fixtures.read("food-policy"), loaded.get(0).document());
+        assertEquals("1.2.826.0.1.6726289.0.1", loaded.get(1).id());
+        assertEquals("Drink", loaded.get(1).name());
+        assertEquals(Fixtures.read("drink-policy"), loaded.get(1).document());
+    }
+
+    @Test void loadedPolicyByIdAndByNameFindTheSameLoadedPolicy() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var byId = configuration.loadedPolicyById("1.2.826.0.1.6726289.0.1");
+        var byName = configuration.loadedPolicyByName("Drink");
+        assertEquals(byId, byName);
+        assertEquals("Drink", byId.name());
+    }
+
+    @Test void loadedPolicyByIdOrNameThrowsForAnUnknownPolicy() {
+        var configuration = new PolicyConfiguration(Fixtures.settings());
+        assertThrows(IllegalArgumentException.class, () -> configuration.loadedPolicyById("not-a-policy"));
+        assertThrows(IllegalArgumentException.class, () -> configuration.loadedPolicyByName("Not a policy"));
+    }
 }

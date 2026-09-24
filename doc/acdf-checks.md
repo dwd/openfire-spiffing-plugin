@@ -215,6 +215,14 @@ again, with one narrower exception on egress to a federated peer:
   with `bad-request` before any entry is evaluated. This is a real, per-request
   ACDF re-evaluation of already-stored entries, not merely the add/build-time
   validation described above.
+- **The policy discovery IQ handler performs no ACDF check at all, only a
+  locality check.** `PolicyIqHandler` rejects a `get` from a non-local `from`
+  with `not-authorized` (the same origin check as the catalogue handler), but
+  it never decodes, validates, or access-checks a label or clearance; it only
+  returns the already-loaded `Spif` documents' id/name/original text
+  (`PolicyConfiguration.loadedPolicies`/`loadedPolicyById`/
+  `loadedPolicyByName`), which are set once at configuration time and never
+  re-derived per request.
 - **Direct `RoutingTable`/session delivery paths that bypass
   `PacketInterceptor` entirely** (some server-generated messages, history
   replay, and room fan-out, per `doc/design.md`'s "Rejection and Openfire
@@ -249,3 +257,4 @@ performs no check whatsoever and never touches a message.
 | IQ / presence, any direction | No | Ignored entirely (not a `Message`) |
 | Label catalogue `get` request, `to=` absent or local | Yes, `acdf` against the server clearance only, re-run per entry | Served if `from` is local; entries failing the server clearance are omitted |
 | Label catalogue `get` request, `to=` a non-local recipient | Yes, `acdf` against the server clearance **and** the peer clearance (no-op if unconfigured), re-run per entry | Served if `from` is local and `to=` is a well-formed JID; entries failing either check are omitted |
+| Policy discovery `get` request (list or fetch by id/name) | No (locality check only) | Served if `from` is local; returns already-loaded policy id/name/document, not re-validated per request |

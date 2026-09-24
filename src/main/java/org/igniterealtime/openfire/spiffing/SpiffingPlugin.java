@@ -3,6 +3,7 @@ package org.igniterealtime.openfire.spiffing;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.openfire.container.PluginManager;
+import org.jivesoftware.openfire.handler.IQHandler;
 import org.jivesoftware.openfire.interceptor.InterceptorManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,8 +20,8 @@ public final class SpiffingPlugin implements Plugin {
         void removeInterceptor(SecurityLabelInterceptor interceptor);
         void addFeature(String namespace);
         void removeFeature(String namespace);
-        void addIqHandler(CatalogIqHandler handler);
-        void removeIqHandler(CatalogIqHandler handler);
+        void addIqHandler(IQHandler handler);
+        void removeIqHandler(IQHandler handler);
         boolean isLocal(JID jid);
         void reply(Message error);
     }
@@ -30,6 +31,7 @@ public final class SpiffingPlugin implements Plugin {
     private final Runtime runtime;
     private SecurityLabelInterceptor interceptor;
     private CatalogIqHandler catalogIqHandler;
+    private PolicyIqHandler policyIqHandler;
 
     public SpiffingPlugin() {
         runtime = new Runtime() {
@@ -37,8 +39,8 @@ public final class SpiffingPlugin implements Plugin {
             public void removeInterceptor(SecurityLabelInterceptor i) { InterceptorManager.getInstance().removeInterceptor(i); }
             public void addFeature(String namespace) { XMPPServer.getInstance().getIQDiscoInfoHandler().addServerFeature(namespace); }
             public void removeFeature(String namespace) { XMPPServer.getInstance().getIQDiscoInfoHandler().removeServerFeature(namespace); }
-            public void addIqHandler(CatalogIqHandler handler) { XMPPServer.getInstance().getIQRouter().addHandler(handler); }
-            public void removeIqHandler(CatalogIqHandler handler) { XMPPServer.getInstance().getIQRouter().removeHandler(handler); }
+            public void addIqHandler(IQHandler handler) { XMPPServer.getInstance().getIQRouter().addHandler(handler); }
+            public void removeIqHandler(IQHandler handler) { XMPPServer.getInstance().getIQRouter().removeHandler(handler); }
             public boolean isLocal(JID jid) { return XMPPServer.getInstance().isLocal(jid); }
             public void reply(Message error) { XMPPServer.getInstance().getRoutingTable().routePacket(error.getTo(), error); }
         };
@@ -70,6 +72,9 @@ public final class SpiffingPlugin implements Plugin {
         catalogIqHandler = new CatalogIqHandler(catalog, runtime::isLocal);
         runtime.addIqHandler(catalogIqHandler);
         runtime.addFeature(CatalogService.NAMESPACE);
+        policyIqHandler = new PolicyIqHandler(configuration::current, runtime::isLocal);
+        runtime.addIqHandler(policyIqHandler);
+        runtime.addFeature(PolicyIqHandler.NAMESPACE);
     }
 
     @Override
@@ -83,6 +88,11 @@ public final class SpiffingPlugin implements Plugin {
             runtime.removeIqHandler(catalogIqHandler);
             runtime.removeFeature(CatalogService.NAMESPACE);
             catalogIqHandler = null;
+        }
+        if (policyIqHandler != null) {
+            runtime.removeIqHandler(policyIqHandler);
+            runtime.removeFeature(PolicyIqHandler.NAMESPACE);
+            policyIqHandler = null;
         }
     }
 

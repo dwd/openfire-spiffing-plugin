@@ -22,7 +22,10 @@ updated accordingly. Catalogue retrieval now runs the peer-clearance ACDF
 check, in addition to the always-checked server clearance, against a
 requested `<catalog/>` `to=` recipient that is not local to this server,
 added September 24, 2026 (see "Label catalogue" below); `doc/acdf-checks.md`
-was updated accordingly.
+was updated accordingly. A local-only IQ handler for discovering the currently
+loaded policies (listing every loaded policy's id/name, and fetching a
+specific policy's full Open XML SPIF document by either) was added
+September 24, 2026 (see "Policy discovery" below).
 
 ## Objective and confirmed requirements
 
@@ -628,6 +631,15 @@ distinguishing a local from a federated `to=` domain, not a live federated
 catalogue request. The 1.84 compatibility variant was not re-run in this
 session.
 
+After adding the policy-discovery IQ handler, `mvn verify` was re-run in this
+session against the project's configured Bouncy Castle 1.78.1: **170 tests
+passed**, with no failures or skips, the Admin Console JSP compiled, and the
+plugin assembly jar was built. Coverage is via direct `PolicyIqHandler`/
+`PolicyConfiguration` calls (listing, id/name lookup, id-over-name priority,
+unknown-id/name, non-`get`, non-local, missing-configuration) with a fixture
+`isLocal` predicate, not a live IQ round-trip through a running server. The
+1.84 compatibility variant was not re-run in this session.
+
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
 The catalogue is a separate, administrator-curated list of named security labels
@@ -702,6 +714,51 @@ selector, format, default flag) with a per-row remove action, and a form to add
 a new entry. It follows the same CSRF-cookie pattern, generic error reporting,
 and escaped redisplay as `spiffing-settings.jsp`.
 
+## Policy discovery (`urn:xmpp:sec-label:policy:0`)
+
+Administrators (and, by extension, any local client) may need to inspect which
+SPIF policy documents are currently loaded, e.g. to render classification/
+category names offline or to detect a configuration change. `PolicyIqHandler`
+answers this over a namespace extending XEP-0258's own `urn:xmpp:sec-label:0`:
+
+- **Namespace and element**: a single `<policy xmlns='urn:xmpp:sec-label:policy:0'/>`
+  child element is used for both requests, following the existing `<catalog/>`
+  handler's pattern of one element name per handler/namespace pair (Openfire's
+  `IQRouter` dispatches by that pair, so a second, differently-named element
+  would need a second handler registration for no real benefit here).
+- **Listing**: a request with neither an `id` nor a `name` attribute returns
+  every loaded policy's id and name as `<item id='...' name='.../>` children,
+  in load order (the primary policy — used for the server/peer clearance and
+  default label, see "Multiple policies" above — is always listed first).
+- **Fetching one policy**: a request with an `id` or `name` attribute returns
+  that policy's original Open XML SPIF document, re-parsed via the same bounded
+  `SecureXml.parse` used elsewhere for administrator-supplied XML, embedded
+  inside a `<policy id='...' name='...'>` response element carrying both
+  identifying attributes regardless of which one was requested by. If both
+  attributes are present, `id` takes priority and `name` is ignored, since a
+  request naming a specific policy is expected to use exactly one selector. A
+  reference to an id/name that is not currently loaded is rejected with
+  `item-not-found`, distinct from `bad-request` (malformed IQ) and
+  `service-unavailable` (no active configuration at all).
+- **Access control**: only requests from local entities are served, matching
+  the existing catalogue handler's `isLocal` check; a loaded policy's full
+  document is administrator-curated configuration, not something published to
+  federated peers.
+- **Storage**: `PolicyConfiguration` now retains each loaded policy's id, name,
+  and original document text as a `LoadedPolicy` record
+  (`loadedPolicies()`/`loadedPolicyById`/`loadedPolicyByName`), captured
+  alongside the existing `Site.load` loop at construction time, rather than
+  re-deriving them from `Spif` (which does not retain the original document
+  text after parsing) on each request.
+
+`SpiffingPlugin` registers `PolicyIqHandler` and advertises the
+`urn:xmpp:sec-label:policy:0` disco feature alongside the existing
+`urn:xmpp:sec-label:0` and `urn:xmpp:sec-label:catalog:2` features, and
+unregisters both on destroy. The plugin's `Runtime` interface's
+`addIqHandler`/`removeIqHandler` methods were generalized from taking a
+`CatalogIqHandler` specifically to the common `IQHandler` supertype, so both
+handlers share the same registration methods.
+
 ## Deferred features
 
 Per-user and per-room clearances; a distinct clearance per specific federated
@@ -711,6 +768,8 @@ clearance and default label are both scoped to a single primary policy, even
 when multiple policies are loaded); MUC history and recipient filtering;
 catalogue discovery for remote/federated entities (a request's `from=` must
 still be local; only the requested `to=` recipient's locality now affects which
-checks apply); recursive forwarded-message handling; cluster configuration
-distribution; and live configuration reload from external file edits. Do not
-describe this increment as complete XEP-0258 support.
+checks apply); policy discovery for remote/federated entities (like the
+catalogue, only local `from=` is served); recursive forwarded-message
+handling; cluster configuration distribution; and live configuration reload
+from external file edits. Do not describe this increment as complete XEP-0258
+support.

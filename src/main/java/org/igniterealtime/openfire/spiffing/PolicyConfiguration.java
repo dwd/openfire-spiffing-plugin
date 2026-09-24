@@ -10,6 +10,7 @@ import org.dom4j.QName;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 
@@ -29,17 +30,25 @@ public final class PolicyConfiguration {
     private final Label defaultLabel;
     private final Element defaultEnvelope;
     private final String defaultDisplayMarking;
+    private final List<LoadedPolicy> loadedPolicies;
+
+    /** A loaded policy's id and name (as declared in its SPIF document) plus its original document text;
+     * used to answer {@link PolicyIqHandler} requests without re-deriving either from the {@link Spif}. */
+    public record LoadedPolicy(String id, String name, String document) {}
 
     public PolicyConfiguration(Settings settings) {
         this.settings = settings;
         site = new Site();
         try {
             Spif primary = null;
+            List<LoadedPolicy> loaded = new ArrayList<>();
             for (String p : settings.policies()) {
-                Spif loaded = site.load(p);
-                if (primary == null) primary = loaded;
+                Spif s = site.load(p);
+                loaded.add(new LoadedPolicy(s.policyId(), s.name(), p));
+                if (primary == null) primary = s;
             }
             policy = primary;
+            loadedPolicies = List.copyOf(loaded);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("A policy is not a valid Open XML SPIF, or duplicates another loaded policy.");
         }
@@ -93,6 +102,25 @@ public final class PolicyConfiguration {
 
     /** Whether an administrator has configured a peer clearance; if not, peer-clearance checks are no-ops. */
     public boolean hasPeerClearance() { return peerClearance != null; }
+
+    /** Every loaded policy's id, name and original document text, in load order (the primary policy,
+     * used for the server/peer clearance and default label, is always first). Used by {@link PolicyIqHandler}
+     * to answer "list the loaded policies" requests and to look up a requested policy's document. */
+    public List<LoadedPolicy> loadedPolicies() { return loadedPolicies; }
+
+    /** The loaded policy with the given id.
+     * @throws IllegalArgumentException if no loaded policy has that id. */
+    public LoadedPolicy loadedPolicyById(String id) {
+        return loadedPolicies.stream().filter(p -> p.id().equals(id)).findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown policy id: " + id));
+    }
+
+    /** The loaded policy with the given name.
+     * @throws IllegalArgumentException if no loaded policy has that name. */
+    public LoadedPolicy loadedPolicyByName(String name) {
+        return loadedPolicies.stream().filter(p -> p.name().equals(name)).findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("Unknown policy name: " + name));
+    }
 
     /**
      * Validates an arbitrary label payload against this policy and clearance and encodes it as a

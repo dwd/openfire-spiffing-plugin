@@ -1,6 +1,7 @@
 package org.igniterealtime.openfire.spiffing;
 
 import org.junit.jupiter.api.Test;
+import org.jivesoftware.openfire.handler.IQHandler;
 import org.jivesoftware.openfire.interceptor.PacketRejectedException;
 import org.xmpp.packet.JID;
 import org.xmpp.packet.Message;
@@ -10,15 +11,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class SpiffingPluginTest {
     static final class Runtime implements SpiffingPlugin.Runtime {
         final List<SecurityLabelInterceptor> interceptors = new ArrayList<>();
-        final List<CatalogIqHandler> iqHandlers = new ArrayList<>();
+        final List<IQHandler> iqHandlers = new ArrayList<>();
         final List<Message> replies = new ArrayList<>();
         final Set<String> features = new HashSet<>();
         public void addInterceptor(SecurityLabelInterceptor i) { interceptors.add(i); }
         public void removeInterceptor(SecurityLabelInterceptor i) { assertTrue(interceptors.remove(i)); }
         public void addFeature(String namespace) { features.add(namespace); }
         public void removeFeature(String namespace) { features.remove(namespace); }
-        public void addIqHandler(CatalogIqHandler handler) { iqHandlers.add(handler); }
-        public void removeIqHandler(CatalogIqHandler handler) { assertTrue(iqHandlers.remove(handler)); }
+        public void addIqHandler(IQHandler handler) { iqHandlers.add(handler); }
+        public void removeIqHandler(IQHandler handler) { assertTrue(iqHandlers.remove(handler)); }
         public boolean isLocal(JID jid) { return true; }
         public void reply(Message error) { replies.add(error); }
     }
@@ -39,9 +40,10 @@ class SpiffingPluginTest {
         plugin.initializePlugin(null, null);
         plugin.initializePlugin(null, null);
         assertEquals(1, runtime.interceptors.size());
-        assertEquals(1, runtime.iqHandlers.size());
+        assertEquals(2, runtime.iqHandlers.size());
         assertTrue(runtime.features.contains(PolicyConfiguration.NAMESPACE));
         assertTrue(runtime.features.contains(CatalogService.NAMESPACE));
+        assertTrue(runtime.features.contains(PolicyIqHandler.NAMESPACE));
         assertFalse(plugin.isConfigured());
         assertFalse(plugin.isCorrupted());
         var interceptor = runtime.interceptors.get(0);
@@ -61,6 +63,7 @@ class SpiffingPluginTest {
         assertTrue(runtime.iqHandlers.isEmpty());
         assertFalse(runtime.features.contains(PolicyConfiguration.NAMESPACE));
         assertFalse(runtime.features.contains(CatalogService.NAMESPACE));
+        assertFalse(runtime.features.contains(PolicyIqHandler.NAMESPACE));
         plugin.initializePlugin(null, null);
         assertEquals(Fixtures.settings(), plugin.getSettings());
         plugin.destroyPlugin();
