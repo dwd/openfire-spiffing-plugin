@@ -19,6 +19,10 @@
   a message's lifetime, update that document to match.
 - Stop and ask questions when requirements or design choices need clarification.
   Record the resulting decisions in the design document.
+- Do not introduce backwards compatibility cases (legacy fallbacks, deprecated
+  overloads, dual code paths for old and new data formats, etc.) without a
+  direct, stated need. Prefer changing call sites and stored data over
+  preserving old shapes "just in case".
 
 ## Project context
 
