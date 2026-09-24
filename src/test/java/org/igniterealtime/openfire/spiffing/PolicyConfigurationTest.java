@@ -295,9 +295,18 @@ class PolicyConfigurationTest {
     @Test void catalogLabelFromASecondLoadedPolicyIsTranslatedAndValidated() {
         var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
         String payload = drinkSpiffyLabel("10", "0").asXML();
-        assertDoesNotThrow(() -> configuration.encodeCatalogLabel(payload, LabelFormat.XML));
+        assertDoesNotThrow(() -> configuration.encodeCatalogLabel(payload, LabelFormat.XML, false));
         String denied = drinkSpiffyLabel("11", null).asXML();
-        assertThrows(IllegalArgumentException.class, () -> configuration.encodeCatalogLabel(denied, LabelFormat.XML));
+        assertThrows(IllegalArgumentException.class, () -> configuration.encodeCatalogLabel(denied, LabelFormat.XML, false));
+    }
+
+    @Test void encodeCatalogLabelOptionallyChecksThePeerClearance() {
+        var permissive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        String payload = Fixtures.read("food-label-milk-chocolate");
+        assertDoesNotThrow(() -> permissive.encodeCatalogLabel(payload, LabelFormat.XML, true));
+        var restrictive = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        assertDoesNotThrow(() -> restrictive.encodeCatalogLabel(payload, LabelFormat.XML, false));
+        assertThrows(IllegalArgumentException.class, () -> restrictive.encodeCatalogLabel(payload, LabelFormat.XML, true));
     }
 
     @Test void clearanceMustBelongToThePrimaryPolicy() {

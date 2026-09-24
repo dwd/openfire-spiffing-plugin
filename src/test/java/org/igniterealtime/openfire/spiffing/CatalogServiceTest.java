@@ -60,14 +60,14 @@ class CatalogServiceTest {
 
     @Test void buildCatalogFailsClosedWithoutAnActiveConfiguration() {
         var service = new CatalogService(new Store(), () -> null);
-        assertThrows(IllegalStateException.class, service::buildCatalog);
+        assertThrows(IllegalStateException.class, () -> service.buildCatalog(false));
     }
 
     @Test void buildCatalogEncodesEachEntryWithSelectorAndDefaultAttributes() {
         var configuration = new PolicyConfiguration(Fixtures.settings());
         var service = new CatalogService(new Store(), () -> configuration);
         service.add("Milk chocolate", "Food|Chocolate", LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
-        var catalog = service.buildCatalog();
+        var catalog = service.buildCatalog(false);
         assertEquals(CatalogService.NAMESPACE, catalog.getNamespaceURI());
         assertEquals("false", catalog.attributeValue("restrict"));
         var item = catalog.element(QName.get("item", CatalogService.NAMESPACE));
@@ -85,7 +85,18 @@ class CatalogServiceTest {
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
         // Simulate a policy/clearance change that no longer authorizes a previously valid entry.
         store.entries.set(0, new CatalogEntry(store.entries.get(0).id(), "Bacon", null, LabelFormat.XML, Fixtures.read("food-label-bacon"), false));
-        var catalog = service.buildCatalog();
+        var catalog = service.buildCatalog(false);
         assertTrue(catalog.elements(QName.get("item", CatalogService.NAMESPACE)).isEmpty());
+    }
+
+    @Test void buildCatalogOmitsAnEntryDeniedByThePeerClearanceWhenRequested() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var service = new CatalogService(new Store(), () -> configuration);
+        // Permitted by the server clearance (food-clearance-all-okay), but the peer clearance denies milk chocolate.
+        service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
+        var withoutPeerCheck = service.buildCatalog(false);
+        assertFalse(withoutPeerCheck.elements(QName.get("item", CatalogService.NAMESPACE)).isEmpty());
+        var withPeerCheck = service.buildCatalog(true);
+        assertTrue(withPeerCheck.elements(QName.get("item", CatalogService.NAMESPACE)).isEmpty());
     }
 }

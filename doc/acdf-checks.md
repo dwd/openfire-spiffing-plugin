@@ -85,9 +85,12 @@ or the underlying Spiffing `Label`), each with its own lifecycle:
 - **Each label catalogue entry**: `CatalogEntry.payload` (with its own
   `LabelFormat`), stored independently of the message-stamping default and
   validated against the active policy/clearance only when added
-  (`CatalogService.add`) and when the catalogue is (re)built for a `get`
-  request (`CatalogService.buildCatalog`); an entry that no longer validates
-  is omitted from the published `<catalog/>`, not rejected outright.
+  (`CatalogService.add`, server clearance only) and when the catalogue is
+  (re)built for a `get` request (`CatalogService.buildCatalog`, server
+  clearance always, plus the peer clearance too when the request's `to=`
+  names a non-local recipient); an entry that no longer validates against
+  whichever checks apply to that request is omitted from the published
+  `<catalog/>`, not rejected outright.
 - **Equivalent labels**: `<equivalentlabel/>` children of an inbound envelope
   are also individually decoded, validated, and access-checked
   (`PolicyConfiguration.check`), though they never replace the primary label.
@@ -199,11 +202,19 @@ again, with one narrower exception on egress to a federated peer:
   carried by a forwarded, carboned, or otherwise nested inner message does
   not authorize (or get checked against) the outer stanza, and is not itself
   separately checked.
-- **The label catalogue IQ handler enforces locality, not ACDF, per
-  request.** `CatalogIqHandler` rejects a `get` from a non-local `from` with
-  `not-authorized`, but that is an origin check, not a re-run of `assertValid`/
-  `acdf` on the requester; the entries it returns were already validated once,
-  at add/build time (see above), not per request against the requester.
+- **The label catalogue IQ handler enforces locality on `from`, and now also
+  reruns the ACDF pipeline per request for `to`.** `CatalogIqHandler` still
+  rejects a `get` from a non-local `from` with `not-authorized` (an origin
+  check, not an `assertValid`/`acdf` re-run on the requester). It additionally
+  reads the request's optional `to=` attribute: when present and not local
+  (per the same injected `isLocal` predicate), it asks
+  `CatalogService.buildCatalog(true)` to re-run `acdf` against the peer
+  clearance for every entry, in addition to the server clearance always
+  checked; a `to=` that is local, or absent, only re-runs the server-clearance
+  check that `buildCatalog` always performs. A malformed `to=` is rejected
+  with `bad-request` before any entry is evaluated. This is a real, per-request
+  ACDF re-evaluation of already-stored entries, not merely the add/build-time
+  validation described above.
 - **Direct `RoutingTable`/session delivery paths that bypass
   `PacketInterceptor` entirely** (some server-generated messages, history
   replay, and room fan-out, per `doc/design.md`'s "Rejection and Openfire
@@ -236,4 +247,5 @@ performs no check whatsoever and never touches a message.
 | Outbound, before send, to another server (`OutgoingServerSession`) | Yes, `acdf` against the peer clearance only (no-op if unconfigured); then a display-marking string comparison for stripping | Rejected/warned if the peer clearance denies the label; otherwise, label stripped if its marking equals the default's, else untouched |
 | Outbound, after send (`processed`) | No | Untouched |
 | IQ / presence, any direction | No | Ignored entirely (not a `Message`) |
-| Label catalogue `get` request | No (locality check only) | Served if `from` is local; entries were validated at add/build time, not per request |
+| Label catalogue `get` request, `to=` absent or local | Yes, `acdf` against the server clearance only, re-run per entry | Served if `from` is local; entries failing the server clearance are omitted |
+| Label catalogue `get` request, `to=` a non-local recipient | Yes, `acdf` against the server clearance **and** the peer clearance (no-op if unconfigured), re-run per entry | Served if `from` is local and `to=` is a well-formed JID; entries failing either check are omitted |

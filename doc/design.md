@@ -18,7 +18,11 @@ configured" below); `doc/acdf-checks.md` was updated accordingly. Support for
 loading multiple policies into one registry, with cross-policy label
 translation via each policy's own declared equivalence mappings, was added
 September 24, 2026 (see "Multiple policies" below); `doc/acdf-checks.md` was
-updated accordingly.
+updated accordingly. Catalogue retrieval now runs the peer-clearance ACDF
+check, in addition to the always-checked server clearance, against a
+requested `<catalog/>` `to=` recipient that is not local to this server,
+added September 24, 2026 (see "Label catalogue" below); `doc/acdf-checks.md`
+was updated accordingly.
 
 ## Objective and confirmed requirements
 
@@ -614,6 +618,16 @@ automation test, only the underlying `SettingsForm.save`/`Settings` validation
 and the JSP's own compilation. The 1.84 compatibility variant was not re-run in
 this session.
 
+After making catalogue retrieval run the peer-clearance ACDF check for a
+requested `to=` recipient that is not local, `mvn verify` was re-run in this
+session against the project's configured Bouncy Castle 1.78.1: **159 tests
+passed**, with no failures or skips, the Admin Console JSP compiled, and the
+plugin assembly jar was built. Coverage uses direct `CatalogIqHandler`/
+`CatalogService`/`PolicyConfiguration` calls with fixture `isLocal` predicates
+distinguishing a local from a federated `to=` domain, not a live federated
+catalogue request. The 1.84 compatibility variant was not re-run in this
+session.
+
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
 The catalogue is a separate, administrator-curated list of named security labels
@@ -637,6 +651,20 @@ with the user before implementation:
   XEP-0258 recommendation ("any entity") but matches the user's explicit choice
   for this deployment; it can be relaxed later if federated catalogue sharing is
   required.
+- **The requested `to=` attribute now drives an extra ACDF check per entry**,
+  rather than being ignored: `CatalogIqHandler` reads the optional `to=`
+  attribute of the `<catalog/>` request element and, when it names a recipient
+  that `isLocal` reports as *not* local to this server, asks
+  `CatalogService.buildCatalog(true)` to also test every entry against the
+  configured peer clearance (`PolicyConfiguration.encodeCatalogLabel`'s new
+  `checkPeerClearance` parameter, calling the same `authorizePeer` used for
+  federated message egress) before publishing it — matching the real check a
+  message to that recipient would have to pass on egress. A local (or absent)
+  `to=` only runs the always-performed server-clearance check, as before. A
+  `to=` that is not a well-formed JID is rejected with `bad-request`. This
+  still publishes a single, server-wide catalogue (no per-recipient catalogue
+  content is added beyond this ACDF filtering) and does not change the
+  locality check above.
 - **Entry content**: each entry has a name, an optional XEP-0258 `selector`
   (validated as a `|`-separated non-empty path), a `LabelFormat` (ESS, NATO XML,
   or Spiffy XML, reusing the existing enum), and its own label payload. The
@@ -681,7 +709,8 @@ peer/remote domain (today's peer clearance is a single default applied to every
 peer); a distinct server clearance or default label per loaded policy (today's
 clearance and default label are both scoped to a single primary policy, even
 when multiple policies are loaded); MUC history and recipient filtering;
-catalogue discovery for remote/federated entities; recursive forwarded-message
-handling; cluster configuration distribution; and live configuration reload
-from external file edits. Do not describe this increment as complete XEP-0258
-support.
+catalogue discovery for remote/federated entities (a request's `from=` must
+still be local; only the requested `to=` recipient's locality now affects which
+checks apply); recursive forwarded-message handling; cluster configuration
+distribution; and live configuration reload from external file edits. Do not
+describe this increment as complete XEP-0258 support.

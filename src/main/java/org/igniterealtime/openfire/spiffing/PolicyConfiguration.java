@@ -97,9 +97,13 @@ public final class PolicyConfiguration {
     /**
      * Validates an arbitrary label payload against this policy and clearance and encodes it as a
      * XEP-0258 envelope, exactly like the default label. Used for label catalogue entries, which are
-     * independent of the configured default.
+     * independent of the configured default. When {@code checkPeerClearance} is {@code true}, the label
+     * is also tested against the configured peer clearance (a no-op when none is configured); used when
+     * building a catalogue for a requested {@code to=} recipient that is not local to this server, since
+     * a message carrying this label to that recipient would also have to pass the egress peer-clearance
+     * check before leaving for that federated peer.
      */
-    public Element encodeCatalogLabel(String payload, LabelFormat format) {
+    public Element encodeCatalogLabel(String payload, LabelFormat format, boolean checkPeerClearance) {
         Label label;
         try {
             label = toPrimary(site.label(format.decode(payload), format.format));
@@ -107,6 +111,7 @@ public final class PolicyConfiguration {
             throw new IllegalArgumentException("The label is not valid input for the selected format.");
         }
         authorize(label);
+        if (checkPeerClearance) authorizePeer(label);
         return encode(label, format);
     }
 

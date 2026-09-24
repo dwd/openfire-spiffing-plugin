@@ -41,7 +41,7 @@ public final class CatalogService {
         }
         CatalogEntry entry = new CatalogEntry(UUID.randomUUID().toString(), name, selector, format, payload, isDefault);
         try {
-            current.encodeCatalogLabel(entry.payload(), entry.format());
+            current.encodeCatalogLabel(entry.payload(), entry.format(), false);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("The label is invalid, exceeds the server clearance, or cannot be represented in the selected format.");
         }
@@ -53,11 +53,14 @@ public final class CatalogService {
     public synchronized void remove(String id) { store.remove(id); }
 
     /**
-     * Builds the catalogue element for the active configuration.
+     * Builds the catalogue element for the active configuration. When {@code checkPeerClearance} is
+     * {@code true}, every entry is also tested against the configured peer clearance (a no-op when none
+     * is configured) before being published, so an entry that would fail the egress peer-clearance check
+     * for a federated {@code to=} recipient is omitted exactly like one that fails the server clearance.
      *
      * @throws IllegalStateException if no configuration is currently active.
      */
-    public Element buildCatalog() {
+    public Element buildCatalog(boolean checkPeerClearance) {
         PolicyConfiguration current = configuration.get();
         if (current == null) {
             throw new IllegalStateException("No active Spiffing configuration; the catalogue is unavailable.");
@@ -69,7 +72,7 @@ public final class CatalogService {
             if (entry.selector() != null) item.addAttribute("selector", entry.selector());
             if (entry.isDefault()) item.addAttribute("default", "true");
             try {
-                item.add(current.encodeCatalogLabel(entry.payload(), entry.format()));
+                item.add(current.encodeCatalogLabel(entry.payload(), entry.format(), checkPeerClearance));
             } catch (RuntimeException e) {
                 item.detach();
                 LOG.warn("Catalogue entry '{}' no longer validates against the active policy; omitted from the published catalogue.", entry.name());
