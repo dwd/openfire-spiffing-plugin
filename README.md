@@ -32,10 +32,12 @@ checkout is required after installing the dependency.
 
 Install `target/spiffing-openfire-plugin-assembly.jar` using Openfire's plugin
 upload page. The archive contains the plugin and Spiffing. Bouncy Castle is supplied by Openfire.
-**Once installed, ordinary inbound messages are blocked until valid settings are
-saved.** No sample policy or clearance is activated automatically. On first
-install, Openfire creates the `ofSpiffingCatalog` database table from
-`src/main/database/spiffing_*.sql` for the label catalogue.
+**The plugin is inactive, and can be installed safely without disrupting existing
+traffic, until an administrator saves a policy, server clearance, and default
+label.** No sample policy or clearance is activated automatically; the settings
+page notes this inactive state. On first install, Openfire creates the
+`ofSpiffingCatalog` database table from `src/main/database/spiffing_*.sql` for
+the label catalogue.
 
 ## Configuration
 
@@ -57,11 +59,13 @@ Configuration is stored as individual Openfire properties under the
 `plugin.spiffing.settings.*` namespace (the `ofProperty` database table for a
 database-backed installation, or the standalone XML properties file otherwise),
 the usual idiom for Openfire and its plugins. Save changes through the Admin
-Console. Invalid saves preserve the previous configuration. Missing or
-corrupted stored settings at startup block ordinary messages. Back up the
-Openfire database (or standalone properties file) to preserve this
-configuration. Configuration is per node; automatic cluster distribution is
-not implemented.
+Console. Invalid saves preserve the previous configuration. Settings that were
+never saved leave the plugin inactive (ordinary messages pass through
+unaffected); corrupted stored settings (something was saved but no longer
+loads or validates) still block ordinary messages at startup, distinct from
+never having been configured at all. Back up the Openfire database (or
+standalone properties file) to preserve this configuration. Configuration is
+per node; automatic cluster distribution is not implemented.
 
 ## Enforcement scope
 
@@ -73,7 +77,9 @@ not implemented.
   clearance membership and policy category rules.
 - Unknown policies, unsupported formats, invalid labels, denied labels, duplicate
   envelopes, and unverified cross-policy equivalents are rejected with a sanitized
-  `forbidden` error. Missing configuration uses `service-unavailable`.
+  `forbidden` error. Corrupted stored configuration uses `service-unavailable`; a
+  plugin that was never configured at all is simply inactive and does not
+  reject anything.
 - Error messages bypass authorization and stamping, as XEP-0258 requires. Error
   messages containing a direct XEP-0258 label are discarded without a reply.
 - Only the outer message's direct label authorizes that message. Forwarded inner

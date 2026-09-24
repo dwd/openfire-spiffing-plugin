@@ -64,7 +64,7 @@ public final class SpiffingPlugin implements Plugin {
         } catch (IllegalArgumentException e) {
             LOG.error("Stored Spiffing configuration is invalid; inbound messages are blocked. Reconfigure in the Admin Console.");
         }
-        interceptor = new SecurityLabelInterceptor(configuration::current, runtime::reply);
+        interceptor = new SecurityLabelInterceptor(configuration::current, configuration::isCorrupted, runtime::reply);
         runtime.addInterceptor(interceptor);
         runtime.addFeature(PolicyConfiguration.NAMESPACE);
         catalogIqHandler = new CatalogIqHandler(catalog, runtime::isLocal);
@@ -92,6 +92,11 @@ public final class SpiffingPlugin implements Plugin {
     }
 
     public boolean isConfigured() { return configuration.current() != null; }
+
+    /** True only when persisted settings exist but failed to load/validate; the plugin blocks ordinary
+     * messages in that state. False both when a valid configuration is active and when the plugin was
+     * simply never configured, in which case it is inactive but does not block anything. */
+    public boolean isCorrupted() { return configuration.isCorrupted(); }
 
     public void save(Settings settings) { configuration.save(settings); }
 

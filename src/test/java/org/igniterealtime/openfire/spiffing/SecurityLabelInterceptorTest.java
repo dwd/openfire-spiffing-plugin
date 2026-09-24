@@ -156,6 +156,32 @@ class SecurityLabelInterceptorTest {
         assertEquals(PacketError.Condition.service_unavailable, replies.get(0).getError().getCondition());
     }
 
+    @Test void corruptedConfigurationBlocksUnlabelledMessages() {
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> true, replies::add);
+        var message = message();
+        assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, null, true, false));
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertEquals(PacketError.Condition.service_unavailable, replies.get(0).getError().getCondition());
+    }
+
+    @Test void neverConfiguredLetsMessagesThroughUnaffected() throws Exception {
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> false, replies::add);
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.ESS)); // would be denied if checked
+        String before = message.toXML();
+        interceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void neverConfiguredLeavesUnlabelledMessagesUnstamped() throws Exception {
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> false, replies::add);
+        var message = message();
+        interceptor.interceptPacket(message, null, true, false);
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertTrue(replies.isEmpty());
+    }
+
     @Test void errorsBypassAuthorizationEvenWhenUnconfigured() throws Exception {
         var interceptor = new SecurityLabelInterceptor(() -> { throw new AssertionError("must not consult clearance"); }, replies::add);
         var message = message();

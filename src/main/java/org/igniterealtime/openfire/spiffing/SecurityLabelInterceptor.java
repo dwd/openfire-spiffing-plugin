@@ -18,10 +18,19 @@ import java.util.function.Supplier;
 public final class SecurityLabelInterceptor implements PacketInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(SecurityLabelInterceptor.class);
     private final Supplier<PolicyConfiguration> configuration;
+    private final Supplier<Boolean> corrupted;
     private final Consumer<Message> reply;
 
+    /** Convenience constructor that treats a missing snapshot as corrupted/fail-closed, matching this
+     * interceptor's original behavior; prefer the three-argument constructor in production so a plugin
+     * that was simply never configured fails open instead (see {@link #interceptPacket}). */
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Consumer<Message> reply) {
+        this(configuration, () -> true, reply);
+    }
+
+    public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Supplier<Boolean> corrupted, Consumer<Message> reply) {
         this.configuration = configuration;
+        this.corrupted = corrupted;
         this.reply = reply;
     }
 
@@ -48,7 +57,11 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         }
         PolicyConfiguration snapshot = configuration.get();
         if (snapshot == null) {
-            reject(message, PacketError.Condition.service_unavailable);
+            // A plugin that was never configured at all (no policy, default label, or server clearance
+            // ever saved) is simply inactive: let the message through completely untouched, so installing
+            // the plugin never disrupts existing traffic. Corrupted persisted settings (something was
+            // saved but failed to load/validate) still fail closed, exactly as before.
+            if (corrupted.get()) reject(message, PacketError.Condition.service_unavailable);
             return;
         }
         // Ingress: a message arriving from a federated peer is also checked against the peer clearance,

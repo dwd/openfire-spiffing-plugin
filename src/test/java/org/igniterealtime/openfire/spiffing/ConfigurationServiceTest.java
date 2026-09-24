@@ -30,6 +30,14 @@ class ConfigurationServiceTest {
         assertEquals(service.current().defaultEnvelope().asXML(), restored.current().defaultEnvelope().asXML());
     }
 
+    @Test void neverConfiguredIsNotCorrupted() {
+        var store = new Store();
+        var service = new ConfigurationService(store);
+        service.reload();
+        assertNull(service.current());
+        assertFalse(service.isCorrupted());
+    }
+
     @Test void invalidUpdatePreservesSavedAndActiveConfiguration() {
         var store = new Store();
         var service = new ConfigurationService(store);
@@ -63,11 +71,14 @@ class ConfigurationServiceTest {
         store.value = new Settings("not a valid Open XML SPIF", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
         assertThrows(IllegalArgumentException.class, service::reload);
         assertNull(service.current());
+        assertTrue(service.isCorrupted());
         service.save(Fixtures.settings());
         assertNotNull(service.current());
+        assertFalse(service.isCorrupted());
         store.value = null;
         service.reload();
         assertNull(service.current());
+        assertFalse(service.isCorrupted());
     }
 
     @Test void rejectsBlankAndOversizedSettings() {

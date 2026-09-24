@@ -11,7 +11,10 @@ federation" below). `doc/acdf-checks.md` documents, as a standalone reference,
 which objects carry a label/clearance and which points in a message's
 lifetime perform a real access-control check, added September 23, 2026. An
 optional default peer clearance, checked on federated ingress and egress, was
-added September 23, 2026 (see "Peer clearance" below).
+added September 23, 2026 (see "Peer clearance" below). A never-configured
+plugin (no policy, default label, or server clearance ever saved) now fails
+open instead of closed, added September 24, 2026 (see "Fail-open when never
+configured" below); `doc/acdf-checks.md` was updated accordingly.
 
 ## Objective and confirmed requirements
 
@@ -32,9 +35,11 @@ increment; they can be revised independently of the confirmed requirements:
 
 - Accept ESS, NATO XML, and Spiffy XML labels. Expose independent input format
   selectors and a default-label output selector, initially ESS.
-- Block ordinary inbound messages while unconfigured or after invalid startup
-  configuration. A working configuration remains active when an Admin Console
-  save is rejected.
+- Fail open (let ordinary messages through unchecked) while never configured;
+  fail closed (block ordinary messages) after invalid/corrupted startup
+  configuration. See "Fail-open when never configured" below for the
+  distinction and its rationale. A working configuration remains active when
+  an Admin Console save is rejected.
 
 The server clearance covers local-client and federated traffic. No per-user or
 per-room clearance is inferred from the server clearance.
@@ -78,11 +83,14 @@ failure while still updating its in-memory cache, so a failed save is not
 guaranteed to surface as an error to the administrator. Both trade-offs were
 raised with, and accepted by, the user in favor of the more idiomatic storage
 mechanism (see the "Catalog storage" and "Storage mechanism" clarification
-questions/answers in the issue history). On startup, missing or incomplete
-properties leave enforcement unconfigured and block ordinary messages, exactly
-as the file-based store did; administrators recover by saving valid settings
-again. Configuration distribution and simultaneous administration across
-cluster nodes are not supported; configure each node separately.
+questions/answers in the issue history). On startup, entirely missing
+properties (nothing ever saved) leave the plugin inactive without blocking
+ordinary messages; incomplete/corrupted properties (something was saved but
+fails to load) still block ordinary messages, exactly as the file-based store
+did — see "Fail-open when never configured" below for how these two states are
+distinguished. Administrators recover from the corrupted case by saving valid
+settings again. Configuration distribution and simultaneous administration
+across cluster nodes are not supported; configure each node separately.
 
 The Admin Console relies on Openfire's administrator authentication. Writes
 require POST and matching CSRF cookie/token values. Submitted documents are
@@ -102,7 +110,10 @@ IQ, and presence callbacks remain outside this increment.
 
 1. For error messages, bypass authorization and stamping. Discard an error with
    a direct XEP-0258 security label without generating a reply.
-2. Read the active snapshot. If absent, reject with `service-unavailable`.
+2. Read the active snapshot. If absent because stored settings are corrupted,
+   reject with `service-unavailable`; if absent because the plugin was simply
+   never configured, let the message through unchanged instead (see
+   "Fail-open when never configured" below).
 3. If no direct XEP-0258 envelope exists, attach a copy of the validated default.
 4. Otherwise require exactly one envelope and check its structure and payload.
    An empty primary `<label/>` explicitly requests the default; replace that
@@ -139,12 +150,12 @@ already has a configuration to check against):
   the message continue unmodified, exactly as it arrived. No reply is sent and
   no default label is stamped over an existing, uncheckable envelope.
 
-Missing configuration (no snapshot published yet, or a failed startup load)
-still unconditionally blocks ordinary messages with `service-unavailable`.
-There is no saved `EnforcementMode` to consult in that state, and defaulting
-to open failure would contradict the fail-closed startup behavior documented
-above; `WARN` only relaxes the outcome of an actual label check against a
-valid, active configuration.
+Corrupted stored configuration (a failed startup/reload load) still
+unconditionally blocks ordinary messages with `service-unavailable`; there is
+no saved `EnforcementMode` to consult in that state. A plugin that was simply
+never configured is a different state and no longer blocks anything (see
+"Fail-open when never configured" below); `WARN`/`ENFORCE` only govern the
+outcome of an actual label check against a valid, active configuration.
 
 `WARN` is the safe default so administrators can roll out a new or changed
 policy and observe real traffic against it before switching to `ENFORCE`.
@@ -152,6 +163,48 @@ Stored settings saved before this switch existed have no `enforcementMode`
 property; `JiveGlobalsConfigurationStore.read` treats that as `WARN`, matching
 the new default and never silently upgrading an existing deployment to
 rejection behavior.
+
+## Fail-open when never configured
+
+Previously, `current() == null` was a single state meaning "block ordinary
+messages," covering both a genuinely never-configured plugin (nothing has ever
+been saved: no policy, default label, or server clearance) and corrupted
+persisted settings (something was saved but fails to load/validate, e.g. after
+an out-of-band edit). The user asked that the never-configured case instead
+"simply not enforce," noting on the configuration page that the plugin isn't
+active, so that installing the plugin never disrupts existing traffic. The
+corrupted case keeps failing closed, since something was actually saved and is
+now broken — that remains a configuration error an administrator must fix, not
+a safe default.
+
+- **Distinguishing the two states**: `ConfigurationService` gained a
+  `corrupted` boolean, set `true` only when `Store.read()` returns non-null
+  data that then fails to parse/validate in `reload()`, and reset to `false`
+  on every successful `reload()`/`save()`. `Store.read()` returning `null`
+  (nothing ever saved) leaves `corrupted` `false`; `current()` is `null` in
+  both cases, so `isCorrupted()` is the only way to tell them apart.
+- **Interceptor behavior**: `SecurityLabelInterceptor` takes a new
+  `Supplier<Boolean> corrupted` constructor parameter (wired to
+  `ConfigurationService::isCorrupted` in `SpiffingPlugin`). When the active
+  snapshot is `null`, it only rejects with `service-unavailable` when
+  `corrupted.get()` is `true`; otherwise the message is returned completely
+  untouched (no stamping, no check, no reply). The pre-existing two-argument
+  constructor defaults `corrupted` to always `true`, preserving the original
+  fail-closed behavior for any caller that does not opt into the new
+  distinction.
+- **Egress is unaffected**: `stripDefaultLabelForFederation` and the
+  peer-clearance egress/ingress checks were already fail-open on a missing
+  snapshot (see their sections below); this change only affects the inbound
+  pre-processing path's own missing-snapshot branch.
+- **Admin Console**: `SpiffingPlugin.isCorrupted()` exposes the same flag.
+  `spiffing-settings.jsp` now shows one of three states instead of two:
+  actively checking messages (`configured`), blocked due to corrupted stored
+  settings (`corrupted`), or inactive because nothing has been configured yet
+  (neither flag set) — the last case explicitly states that messages pass
+  through unaffected.
+- **README**: updated to describe the plugin as safe to install without
+  service disruption before it is configured, while still calling out that
+  corrupted stored settings continue to block traffic until fixed.
 
 ## Outbound default-label stripping for federation
 
@@ -375,8 +428,10 @@ message objects. Coverage includes:
   and external entities in every administrator document.
 - Every ordinary message type, local-session and null-session handling, default
   stamping and repeat callbacks, preservation of existing labels/extensions,
-  sanitized rejection addressing, missing configuration, errors without loops,
-  outbound/non-message exclusions, and failed reply delivery.
+  sanitized rejection addressing, corrupted configuration blocking, a
+  never-configured plugin letting labelled and unlabelled messages through
+  untouched, errors without loops, outbound/non-message exclusions, and failed
+  reply delivery.
 - Configuration round trips, complete-save/restart restoration, invalid saves,
   storage failures, startup recovery, concurrent snapshot reads,
   CSRF/method/missing-field rejection, and plugin registration/removal/discovery
@@ -453,6 +508,14 @@ was built. As with the existing federated-session tests, both ingress and egress
 peer-clearance coverage uses `IncomingServerSession`/`OutgoingServerSession` test
 doubles rather than a live federated pair. The 1.84 compatibility variant was not
 re-run in this session.
+
+After adding fail-open-when-never-configured behavior, `mvn verify` was re-run
+in this session against the project's configured Bouncy Castle 1.78.1: **133
+tests passed**, with no failures or skips (the net test count was unchanged,
+since new coverage for the never-configured/corrupted distinction replaced
+what had been a single, now-split, missing-configuration scenario), the Admin
+Console JSP compiled, and the plugin assembly jar was built. The 1.84
+compatibility variant was not re-run in this session.
 
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 

@@ -69,6 +69,7 @@
     pageContext.setAttribute("csrf", csrf);
     pageContext.setAttribute("error", error);
     pageContext.setAttribute("configured", plugin.isConfigured());
+    pageContext.setAttribute("corrupted", plugin.isCorrupted());
     pageContext.setAttribute("policy", policy);
     pageContext.setAttribute("clearance", clearance);
     pageContext.setAttribute("label", label);
@@ -89,7 +90,8 @@
 <c:if test="${param.saved eq 'true' and empty error}"><admin:infoBox type="success">Settings saved.</admin:infoBox></c:if>
 <c:choose>
     <c:when test="${configured}"><p>Inbound messages are checked against the server clearance. Unlabelled messages receive the default label.</p></c:when>
-    <c:otherwise><admin:infoBox type="warning">Inbound messages are blocked until a valid configuration is saved.</admin:infoBox></c:otherwise>
+    <c:when test="${corrupted}"><admin:infoBox type="warning">Stored settings are incomplete or corrupted, so inbound messages are blocked until a valid configuration is saved.</admin:infoBox></c:when>
+    <c:otherwise><admin:infoBox type="info">The plugin is not configured, so it is not active: no policy, default label, or server clearance has been saved yet. Messages pass through unaffected until settings are saved here.</admin:infoBox></c:otherwise>
 </c:choose>
 <c:if test="${configured}">
     <c:choose>

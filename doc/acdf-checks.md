@@ -5,7 +5,7 @@ cross-referenced against `doc/design.md`: which objects carry a label or a
 clearance, and at which points in a message's lifetime the plugin actually
 performs an access-control check. It does not introduce any new behavior; it
 only describes what `PolicyConfiguration` and `SecurityLabelInterceptor`
-already do, as of the "Peer clearance" increment.
+already do, as of the "Fail-open when never configured" increment.
 
 ## Objects that have a clearance
 
@@ -106,10 +106,17 @@ processes the packet) does the following, for every non-error message:
 1. **Error messages bypass all checks.** An error carrying a direct
    XEP-0258 label is discarded (`PacketRejectedException`) without ever being
    authorized; XEP-0258 §6 does not require label checks on errors.
-2. **Missing configuration blocks the message.** If no valid
-   `PolicyConfiguration` snapshot has ever been published, every ordinary
-   message is rejected with `service-unavailable`, regardless of whether it
-   carries a label.
+2. **A missing configuration snapshot is either fail-open or fail-closed,
+   depending on why it is missing.** If persisted settings exist but failed to
+   load/validate (`ConfigurationService.isCorrupted()` is `true`), every
+   ordinary message is still rejected with `service-unavailable`, regardless
+   of whether it carries a label — this is the only remaining unconditional
+   block in the message's lifetime. If the plugin was simply never configured
+   at all (no policy, default label, or server clearance ever saved;
+   `isCorrupted()` is `false`), the message instead passes through completely
+   unchecked and unmodified: no stamping, no access-control decision, no
+   reply. This distinction was added so that installing the plugin can never
+   disrupt existing traffic before an administrator configures it.
 3. **Unlabelled messages are stamped, and, from a federated peer, also
    checked against the peer clearance first.** A message with no direct
    envelope receives a copy of the already-validated default; there is
@@ -194,13 +201,17 @@ inbound hook; a federated inbound or outbound message additionally gets one
 peer-clearance-only `acdf` decision (a no-op without a configured peer
 clearance), at that same inbound hook or at the pre-send outbound hook,
 respectively. No message is re-checked at any other point in its lifetime.
+This entire pipeline only runs once the plugin has an active or corrupted
+configuration to react to; a plugin that has never been configured at all
+performs no check whatsoever and never touches a message.
 
 ## Summary table
 
 | Point in a message's lifetime | Real ACDF check (`assertValid`/`acdf`)? | What happens |
 | --- | --- | --- |
 | Inbound, before processing (error message) | No | Discarded if labelled; otherwise passed through unchecked |
-| Inbound, before processing (no configuration) | No | Rejected, `service-unavailable` |
+| Inbound, before processing (corrupted stored configuration) | No | Rejected, `service-unavailable` |
+| Inbound, before processing (never configured) | No | Passed through completely unchecked and unmodified |
 | Inbound, before processing (unlabelled, local client) | Yes, `acdf` against the server clearance only, on the *default* label, already validated at config time | Stamped with a copy of the default |
 | Inbound, before processing (unlabelled, federated peer) | Yes, `acdf` against the server clearance (at config time) **and** the peer clearance (per message, no-op if unconfigured), on the *default* label | Stamped with a copy of the default, or rejected/warned if the peer clearance denies it |
 | Inbound, before processing (labelled, local client) | **Yes**, `acdf` against the server clearance only | Accepted unchanged, replaced by the default (empty `<label/>`), or rejected/warned |

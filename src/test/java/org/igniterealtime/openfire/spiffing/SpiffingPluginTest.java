@@ -43,8 +43,13 @@ class SpiffingPluginTest {
         assertTrue(runtime.features.contains(PolicyConfiguration.NAMESPACE));
         assertTrue(runtime.features.contains(CatalogService.NAMESPACE));
         assertFalse(plugin.isConfigured());
+        assertFalse(plugin.isCorrupted());
         var interceptor = runtime.interceptors.get(0);
-        assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(new Message(), null, true, false));
+        // Never configured: the plugin is inactive, so a message passes through completely unchecked.
+        var uncheckedMessage = new Message();
+        interceptor.interceptPacket(uncheckedMessage, null, true, false);
+        assertNull(uncheckedMessage.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertTrue(runtime.replies.isEmpty());
         plugin.save(Fixtures.settings());
         assertTrue(plugin.isConfigured());
         var message = new Message();
@@ -71,10 +76,12 @@ class SpiffingPluginTest {
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
         assertFalse(plugin.isConfigured());
+        assertTrue(plugin.isCorrupted());
         assertEquals(1, runtime.interceptors.size());
         assertThrows(PacketRejectedException.class, () -> runtime.interceptors.get(0).interceptPacket(new Message(), null, true, false));
         plugin.save(Fixtures.settings());
         assertTrue(plugin.isConfigured());
+        assertFalse(plugin.isCorrupted());
         plugin.destroyPlugin();
     }
 
