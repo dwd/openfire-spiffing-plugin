@@ -12,7 +12,7 @@ Administrators can also curate a named label catalogue in **Server → Server
 Settings → Spiffing label catalogue**, answering XEP-0258 catalogue discovery
 (`urn:xmpp:sec-label:catalog:2`) for local clients.
 
-Requires **Openfire 5.0.0 or later running Java 17 or later**. The Java requirement
+Requires **Openfire 5.2.0 or later running Java 17 or later**. The Java requirement
 comes from Spiffing. This is the first server enforcement increment, not a full
 implementation of every XEP-0258 feature.
 

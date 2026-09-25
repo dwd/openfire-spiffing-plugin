@@ -29,7 +29,11 @@ September 24, 2026 (see "Policy discovery" below). Saving settings with
 multiple policies could throw `NoSuchMethodError` and render a mostly blank
 Admin Console page on some Openfire builds; `JiveGlobalsConfigurationStore`
 was changed to stop depending on `JiveGlobals`' list-property overload, fixed
-September 25, 2026 (see "Build and dependency compatibility" below).
+September 25, 2026 (see "Build and dependency compatibility" below). The
+plugin's `provided`/parent dependency was moved from Openfire 5.0.0 to
+5.2.0-SNAPSHOT (no released 5.2.0 exists yet), which also raised the pinned
+Bouncy Castle version to 1.84, on September 25, 2026 (see "Build and
+dependency compatibility" below).
 
 ## Objective and confirmed requirements
 
@@ -483,9 +487,17 @@ Message bodies and full policy/clearance documents are not logged on rejection.
 
 ## Build and dependency compatibility
 
-Target Openfire 5.0.0 APIs and Java 17 bytecode, matching Spiffing's minimum runtime.
-Spiffing dropped its baseline from Java 22 to Java 17; this plugin's build property,
-plugin descriptor, CI matrix, and documentation were updated to match. The plugin
+Target Openfire 5.2.0-SNAPSHOT APIs and Java 17 bytecode, matching Spiffing's
+minimum runtime. The parent POM, `openfire.version`, and `bouncycastle.version`
+were moved from the 5.0.0 release line to the 5.2.0-SNAPSHOT line, since the
+target deployment (the adjacent `~/src/Openfire` checkout) runs that line; no
+released Openfire 5.2.0 exists yet, so the plugin necessarily depends on a
+snapshot parent/`xmppserver` build, cached locally and resolvable from the
+same Ignite Realtime repository already configured for the parent POM. This is
+a temporary state until Openfire 5.2.0 is actually released; the version
+should be revisited then. Spiffing dropped its baseline from Java 22 to Java 17;
+this plugin's build property, plugin descriptor, CI matrix, and documentation
+were updated to match. The plugin
 source and tests previously used a few Java 21+ conveniences
 (`List.getFirst()`/`getLast()`, and one `ExecutorService` try-with-resources,
 which requires Java 19's `AutoCloseable` support); these were rewritten with
@@ -518,11 +530,11 @@ coverage" below), so this was verified by inspecting the compiled
 reproducing the runtime error against an actual mismatched server build.
 
 Openfire's parent classloader supplies Bouncy Castle. Declare `bcprov-jdk18on`
-provided and test against Openfire 5.0.0's version 1.78.1. A second compatibility
-run uses version 1.84 from the adjacent Openfire checkout. The archive bundles
-Spiffing and the plugin, without a competing Bouncy Castle JAR. The snapshot
-library dependency must be released/pinned to a published version before a
-release build can satisfy the parent POM's release-dependency rule.
+provided; `bouncycastle.version` now follows the 5.2.0-SNAPSHOT parent's pinned
+version, 1.84 (previously 1.78.1, matching the 5.0.0 release line). The archive
+bundles Spiffing and the plugin, without a competing Bouncy Castle JAR. The
+snapshot library dependency must be released/pinned to a published version
+before a release build can satisfy the parent POM's release-dependency rule.
 
 ## Tests and remaining verification
 
@@ -666,6 +678,23 @@ plugin assembly jar was built. Coverage is via direct `PolicyIqHandler`/
 unknown-id/name, non-`get`, non-local, missing-configuration) with a fixture
 `isLocal` predicate, not a live IQ round-trip through a running server. The
 1.84 compatibility variant was not re-run in this session.
+
+After changing `JiveGlobalsConfigurationStore` to stop calling
+`JiveGlobals.setProperty(String, List)`/`getProperties(String)` (see "Build
+and dependency compatibility" above), `mvn verify` was re-run in this session
+against the project's configured Bouncy Castle 1.78.1: **166 tests passed**,
+with no failures or skips, the Admin Console JSP compiled, and the plugin
+assembly jar was built. `JiveGlobalsConfigurationStore` remains untested
+directly; this was not verified against a live `NoSuchMethodError`
+reproduction.
+
+After moving the parent POM and `openfire.version`/`bouncycastle.version` to
+the 5.2.0-SNAPSHOT line, `mvn verify` was re-run in this session: **166 tests
+passed**, with no failures or skips, the Admin Console JSP compiled, and the
+plugin assembly jar was built, all resolved against the locally cached
+5.2.0-SNAPSHOT parent/`xmppserver`/Bouncy Castle 1.84 artifacts. The 1.78.1
+compatibility variant (matching the now-superseded 5.0.0 release line) was not
+re-run in this session.
 
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
