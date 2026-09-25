@@ -25,7 +25,11 @@ added September 24, 2026 (see "Label catalogue" below); `doc/acdf-checks.md`
 was updated accordingly. A local-only IQ handler for discovering the currently
 loaded policies (listing every loaded policy's id/name, and fetching a
 specific policy's full Open XML SPIF document by either) was added
-September 24, 2026 (see "Policy discovery" below).
+September 24, 2026 (see "Policy discovery" below). Saving settings with
+multiple policies could throw `NoSuchMethodError` and render a mostly blank
+Admin Console page on some Openfire builds; `JiveGlobalsConfigurationStore`
+was changed to stop depending on `JiveGlobals`' list-property overload, fixed
+September 25, 2026 (see "Build and dependency compatibility" below).
 
 ## Objective and confirmed requirements
 
@@ -390,13 +394,15 @@ possible interpretations of "allow multiple policies to be loaded":
   into a one-element list. `Settings` keeps its familiar single-policy
   constructors and a `policy()` convenience accessor (the primary policy)
   alongside the new list-based ones, so no existing call site needed to
-  change. `JiveGlobalsConfigurationStore` persists the list using
+  change. `JiveGlobalsConfigurationStore` originally persisted the list using
   `JiveGlobals`' own list-property support (`setProperty(String, List)`/
-  `getProperties(String)`), which stores each entry as an ordered child
-  property and replaces every child on each save (no stale entries when the
-  list shrinks); settings saved before this feature existed have a single
-  scalar `policy` property with no children, which `read()` falls back to,
-  and the next save migrates to the list-based form.
+  `getProperties(String)`); this was replaced by a manual `policy.count` plus
+  indexed `policy.<n>` scheme after that overload was found to throw
+  `NoSuchMethodError` on a reported deployment (see "Build and dependency
+  compatibility" below for details). Either way, a shrinking list never
+  leaves stale entries behind; settings saved before this feature existed
+  have a single scalar `policy` property with no `policy.count`, which
+  `read()` falls back to, and the next save migrates to the indexed form.
 
 ## Label envelope and policy semantics
 
@@ -489,6 +495,27 @@ descriptor declares both minimum versions. The plugin depends on
 `io.cridland:spiffing:1.0-SNAPSHOT`; CI checks out and installs Spiffing commit
 `60c474434fc57f9a1ecab7e9549773f3a6656614`. Tests copy MIT-licensed Food policy
 fixtures so the test runtime does not depend on the sibling checkout.
+
+`JiveGlobals.setProperty(String, List<String>)`/`getProperties(String)` (used
+by an earlier version of `JiveGlobalsConfigurationStore` to persist the policy
+list, see "Multiple policies" above) is present in this project's own
+`xmppserver` build artifact, but a real deployment reported
+`NoSuchMethodError: JiveGlobals.setProperty(String, List)` when saving
+settings, since `JiveGlobals` is declared `provided` and is actually supplied
+by whatever `xmppserver` jar the running server ships, not the one this plugin
+compiles against. Because that error is a `java.lang.Error`, not a
+`RuntimeException`, it was not caught by the settings page's existing
+`catch (RuntimeException e)` handling and escaped uncaught, which Jetty/Jasper
+rendered as a mostly blank page instead of the plugin's own error message.
+Fixed by having `JiveGlobalsConfigurationStore` persist the policy list using
+only the oldest, universally-available scalar `JiveGlobals` methods
+(`getProperty`/`setProperty(String, String)`/`deleteProperty`/`getIntProperty`)
+instead of the list-property overload, removing the dependency on an API whose
+availability cannot be guaranteed across every Openfire build this plugin
+targets. `JiveGlobalsConfigurationStore` remains untested directly (see "Test
+coverage" below), so this was verified by inspecting the compiled
+`xmppserver-5.0.0.jar` method signatures and by `mvn verify`, not by
+reproducing the runtime error against an actual mismatched server build.
 
 Openfire's parent classloader supplies Bouncy Castle. Declare `bcprov-jdk18on`
 provided and test against Openfire 5.0.0's version 1.78.1. A second compatibility

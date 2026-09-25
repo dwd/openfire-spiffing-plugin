@@ -2,6 +2,7 @@ package org.igniterealtime.openfire.spiffing;
 
 import org.jivesoftware.util.JiveGlobals;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -12,23 +13,35 @@ import java.util.List;
  * {@link #write} can leave a mix of old and new field values, and {@code JiveGlobals} itself does not
  * surface every underlying persistence failure to the caller.
  * <p>
- * The policy list is persisted using {@code JiveGlobals}' own list-property support
- * ({@link JiveGlobals#setProperty(String, List)}/{@link JiveGlobals#getProperties(String)}), which stores
- * each entry as its own ordered child property and replaces every child on each save, so a shrinking list
- * never leaves stale entries behind. Settings saved before multiple policies were supported instead have a
- * single scalar {@code policy} property with no children; {@link #read()} falls back to that value, and the
- * first subsequent {@link #write} migrates it to the list-based form.
+ * The policy list is persisted manually as a {@code policy.count} property plus one indexed
+ * {@code policy.<n>} property per entry, using only the basic scalar {@code JiveGlobals} property
+ * methods. {@code JiveGlobals}' own list-property support ({@code setProperty(String, List)}/
+ * {@code getProperties(String)}) is deliberately not used here: that overload is not reliably present
+ * on every Openfire build this plugin targets, and calling it can fail with a {@link NoSuchMethodError}
+ * at save time. On write, any indexed entries left over from a previously larger list are removed, so a
+ * shrinking list never leaves stale entries behind. Settings saved before multiple policies were supported
+ * instead have a single scalar {@code policy} property with no {@code policy.count}; {@link #read()} falls
+ * back to that value, and the first subsequent {@link #write} migrates it to the indexed form.
  */
 final class JiveGlobalsConfigurationStore implements ConfigurationService.Store {
     private static final String PREFIX = "plugin.spiffing.settings.";
+    private static final String POLICY_COUNT = PREFIX + "policy.count";
 
     @Override
     public Settings read() {
-        List<String> policies = JiveGlobals.getProperties(PREFIX + "policy");
-        if (policies.isEmpty()) {
+        List<String> policies;
+        int count = JiveGlobals.getIntProperty(POLICY_COUNT, -1);
+        if (count < 0) {
             String legacyPolicy = JiveGlobals.getProperty(PREFIX + "policy");
             if (legacyPolicy == null) return null;
             policies = List.of(legacyPolicy);
+        } else {
+            policies = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                String p = JiveGlobals.getProperty(PREFIX + "policy." + i);
+                if (p == null) throw new IllegalArgumentException("Stored Spiffing settings are incomplete or corrupted.");
+                policies.add(p);
+            }
         }
         try {
             String clearance = require("clearance");
@@ -54,7 +67,17 @@ final class JiveGlobalsConfigurationStore implements ConfigurationService.Store 
 
     @Override
     public void write(Settings settings) {
-        JiveGlobals.setProperty(PREFIX + "policy", settings.policies());
+        List<String> policies = settings.policies();
+        int previousCount = JiveGlobals.getIntProperty(POLICY_COUNT, 0);
+        JiveGlobals.setProperty(POLICY_COUNT, String.valueOf(policies.size()));
+        for (int i = 0; i < policies.size(); i++) {
+            JiveGlobals.setProperty(PREFIX + "policy." + i, policies.get(i));
+        }
+        for (int i = policies.size(); i < previousCount; i++) {
+            JiveGlobals.deleteProperty(PREFIX + "policy." + i);
+        }
+        // Superseded by the indexed form above; remove so a stale value is never read back by mistake.
+        JiveGlobals.deleteProperty(PREFIX + "policy");
         JiveGlobals.setProperty(PREFIX + "clearance", settings.clearance());
         JiveGlobals.setProperty(PREFIX + "clearanceFormat", settings.clearanceFormat().name());
         JiveGlobals.setProperty(PREFIX + "defaultLabel", settings.defaultLabel());
