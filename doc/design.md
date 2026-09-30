@@ -787,25 +787,35 @@ answers this over a namespace extending XEP-0258's own `urn:xmpp:sec-label:0`:
   in load order (the primary policy — used for the server/peer clearance and
   default label, see "Multiple policies" above — is always listed first).
 - **Fetching one policy**: a request with an `id` or `name` attribute returns
-  that policy's original Open XML SPIF document, re-parsed via the same bounded
-  `SecureXml.parse` used elsewhere for administrator-supplied XML, embedded
-  inside a `<policy id='...' name='...'>` response element carrying both
-  identifying attributes regardless of which one was requested by. If both
+  that policy's Open XML SPIF document, exported via Spiffing Java's
+  `Spif.write(Format.XML, Clearance)` (re-serialized from the parsed model, not
+  a retained copy of the original document text) and re-parsed via the same
+  bounded `SecureXml.parse` used elsewhere for administrator-supplied XML,
+  embedded inside a `<policy id='...' name='...'>` response element carrying
+  both identifying attributes regardless of which one was requested by. If both
   attributes are present, `id` takes priority and `name` is ignored, since a
   request naming a specific policy is expected to use exactly one selector. A
   reference to an id/name that is not currently loaded is rejected with
   `item-not-found`, distinct from `bad-request` (malformed IQ) and
   `service-unavailable` (no active configuration at all).
+- **No clearance filtering (yet)**: `Spif.write` accepts an optional `Clearance`
+  to omit categories the clearance cannot see, but `PolicyConfiguration.
+  exportedDocument` always calls it with `null`, exporting every loaded policy
+  in full. This was an explicit choice: the single configured clearance belongs
+  only to the primary policy (see "Multiple policies" above), applying it to
+  secondary loaded policies would be meaningless, and filtering the primary
+  policy's own document was not requested for this feature. A future increment
+  could pass the server (or peer) clearance through if selective disclosure of
+  the primary policy's document is ever needed.
 - **Access control**: only requests from local entities are served, matching
   the existing catalogue handler's `isLocal` check; a loaded policy's full
   document is administrator-curated configuration, not something published to
   federated peers.
-- **Storage**: `PolicyConfiguration` now retains each loaded policy's id, name,
-  and original document text as a `LoadedPolicy` record
-  (`loadedPolicies()`/`loadedPolicyById`/`loadedPolicyByName`), captured
-  alongside the existing `Site.load` loop at construction time, rather than
-  re-deriving them from `Spif` (which does not retain the original document
-  text after parsing) on each request.
+- **Storage**: `PolicyConfiguration` retains each loaded policy's id and name as
+  a `LoadedPolicy` record (`loadedPolicies()`/`loadedPolicyById`/
+  `loadedPolicyByName`), captured alongside the existing `Site.load` loop at
+  construction time; the document itself is not retained and is re-exported
+  from the `Spif` (via `exportedDocument`/`Site.spif(id)`) on each request.
 
 `SpiffingPlugin` registers `PolicyIqHandler` and advertises the
 `urn:xmpp:sec-label:policy:0` disco feature alongside the existing

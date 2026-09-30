@@ -1,6 +1,7 @@
 package org.igniterealtime.openfire.spiffing;
 
 import io.cridland.spiffing.Clearance;
+import io.cridland.spiffing.Format;
 import io.cridland.spiffing.Label;
 import io.cridland.spiffing.Site;
 import io.cridland.spiffing.Spif;
@@ -32,9 +33,11 @@ public final class PolicyConfiguration {
     private final String defaultDisplayMarking;
     private final List<LoadedPolicy> loadedPolicies;
 
-    /** A loaded policy's id and name (as declared in its SPIF document) plus its original document text;
-     * used to answer {@link PolicyIqHandler} requests without re-deriving either from the {@link Spif}. */
-    public record LoadedPolicy(String id, String name, String document) {}
+    /** A loaded policy's id and name, as declared in its SPIF document; used to answer {@link PolicyIqHandler}
+     * "list the loaded policies" requests and to look up a policy by either attribute. The document itself
+     * is not retained here: {@link #exportedDocument} re-derives it from the {@link Spif} on each request
+     * via {@link Spif#write}, the same call used for an optional future clearance-filtered export. */
+    public record LoadedPolicy(String id, String name) {}
 
     public PolicyConfiguration(Settings settings) {
         this.settings = settings;
@@ -44,7 +47,7 @@ public final class PolicyConfiguration {
             List<LoadedPolicy> loaded = new ArrayList<>();
             for (String p : settings.policies()) {
                 Spif s = site.load(p);
-                loaded.add(new LoadedPolicy(s.policyId(), s.name(), p));
+                loaded.add(new LoadedPolicy(s.policyId(), s.name()));
                 if (primary == null) primary = s;
             }
             policy = primary;
@@ -103,9 +106,10 @@ public final class PolicyConfiguration {
     /** Whether an administrator has configured a peer clearance; if not, peer-clearance checks are no-ops. */
     public boolean hasPeerClearance() { return peerClearance != null; }
 
-    /** Every loaded policy's id, name and original document text, in load order (the primary policy,
+    /** Every loaded policy's id and name, in load order (the primary policy,
      * used for the server/peer clearance and default label, is always first). Used by {@link PolicyIqHandler}
-     * to answer "list the loaded policies" requests and to look up a requested policy's document. */
+     * to answer "list the loaded policies" requests and to look up a requested policy's id/name before
+     * exporting its document via {@link #exportedDocument}. */
     public List<LoadedPolicy> loadedPolicies() { return loadedPolicies; }
 
     /** The loaded policy with the given id.
@@ -120,6 +124,18 @@ public final class PolicyConfiguration {
     public LoadedPolicy loadedPolicyByName(String name) {
         return loadedPolicies.stream().filter(p -> p.name().equals(name)).findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Unknown policy name: " + name));
+    }
+
+    /**
+     * Exports the given loaded policy's Open XML SPIF document via {@link Spif#write}, re-serializing it
+     * from the parsed model rather than returning a previously retained copy of the original document text.
+     * No clearance filter is applied (equivalent to {@code Spif.write(Format.XML, null)}): every loaded
+     * policy, primary or secondary, is exported in full, since this deployment's single configured
+     * clearance only belongs to the primary policy and filtering was not requested for this feature.
+     */
+    public String exportedDocument(LoadedPolicy loaded) {
+        Spif target = site.spif(loaded.id());
+        return new String(target.write(Format.XML), StandardCharsets.UTF_8);
     }
 
     /**

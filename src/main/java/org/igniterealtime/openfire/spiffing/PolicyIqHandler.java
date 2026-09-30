@@ -60,7 +60,7 @@ public final class PolicyIqHandler extends IQHandler {
             } catch (IllegalArgumentException e) {
                 return error(packet, PacketError.Condition.item_not_found);
             }
-            result = buildDocument(loaded);
+            result = buildDocument(current, loaded);
         }
         IQ response = IQ.createResultIQ(packet);
         response.setChildElement(result);
@@ -77,11 +77,11 @@ public final class PolicyIqHandler extends IQHandler {
         return policy;
     }
 
-    private static Element buildDocument(PolicyConfiguration.LoadedPolicy loaded) {
+    private static Element buildDocument(PolicyConfiguration current, PolicyConfiguration.LoadedPolicy loaded) {
         Element policy = DocumentHelper.createElement(QName.get("policy", NAMESPACE));
         policy.addAttribute("id", loaded.id());
         policy.addAttribute("name", loaded.name());
-        policy.add(SecureXml.parse(loaded.document(), SecureXml.MAX_DOCUMENT));
+        policy.add(SecureXml.parse(current.exportedDocument(loaded), SecureXml.MAX_DOCUMENT));
         return policy;
     }
 

@@ -219,10 +219,12 @@ again, with one narrower exception on egress to a federated peer:
   locality check.** `PolicyIqHandler` rejects a `get` from a non-local `from`
   with `not-authorized` (the same origin check as the catalogue handler), but
   it never decodes, validates, or access-checks a label or clearance; it only
-  returns the already-loaded `Spif` documents' id/name/original text
+  returns the already-loaded `Spif` documents' id/name
   (`PolicyConfiguration.loadedPolicies`/`loadedPolicyById`/
-  `loadedPolicyByName`), which are set once at configuration time and never
-  re-derived per request.
+  `loadedPolicyByName`, set once at configuration time) and, for a single-policy
+  request, that `Spif`'s document, re-exported per request via
+  `PolicyConfiguration.exportedDocument` (`Spif.write` with no clearance
+  filter, so every loaded policy is always returned in full).
 - **Direct `RoutingTable`/session delivery paths that bypass
   `PacketInterceptor` entirely** (some server-generated messages, history
   replay, and room fan-out, per `doc/design.md`'s "Rejection and Openfire

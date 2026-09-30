@@ -324,16 +324,29 @@ class PolicyConfigurationTest {
             List.of(s.policy(), s.policy()), s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat())));
     }
 
-    @Test void loadedPoliciesListsEveryLoadedPolicyInLoadOrderWithItsOriginalDocument() {
+    @Test void loadedPoliciesListsEveryLoadedPolicyInLoadOrder() {
         var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
         var loaded = configuration.loadedPolicies();
         assertEquals(2, loaded.size());
         assertEquals("1.2.826.0.1.6726289.0.0", loaded.get(0).id());
         assertEquals("Food", loaded.get(0).name());
-        assertEquals(Fixtures.read("food-policy"), loaded.get(0).document());
         assertEquals("1.2.826.0.1.6726289.0.1", loaded.get(1).id());
         assertEquals("Drink", loaded.get(1).name());
-        assertEquals(Fixtures.read("drink-policy"), loaded.get(1).document());
+    }
+
+    @Test void exportedDocumentReExportsAFullUnfilteredEquivalentOfEachLoadedPolicy() {
+        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var loaded = configuration.loadedPolicies();
+        // The exported document is re-serialized from the parsed model, not the original document text,
+        // but re-parsing it must still yield the same policy id/name and the full set of classifications.
+        var reparsedFood = new io.cridland.spiffing.Site().load(configuration.exportedDocument(loaded.get(0)));
+        assertEquals("1.2.826.0.1.6726289.0.0", reparsedFood.policyId());
+        assertEquals("Food", reparsedFood.name());
+        var originalFood = new io.cridland.spiffing.Site().load(Fixtures.read("food-policy"));
+        assertEquals(originalFood.classifications().size(), reparsedFood.classifications().size());
+        var reparsedDrink = new io.cridland.spiffing.Site().load(configuration.exportedDocument(loaded.get(1)));
+        assertEquals("1.2.826.0.1.6726289.0.1", reparsedDrink.policyId());
+        assertEquals("Drink", reparsedDrink.name());
     }
 
     @Test void loadedPolicyByIdAndByNameFindTheSameLoadedPolicy() {
