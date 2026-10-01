@@ -23,7 +23,7 @@
         <openfire.version>5.2.0-SNAPSHOT</openfire.version>
         <maven.compiler.release>17</maven.compiler.release>
         <!-- Openfire owns this library and loads it before plugin dependencies. -->
-        <bouncycastle.version>1.84</bouncycastle.version>
+        <bouncycastle.version>1.86</bouncycastle.version>
     </properties>
 
     <repositories>
