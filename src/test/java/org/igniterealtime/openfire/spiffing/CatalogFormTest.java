@@ -62,4 +62,71 @@ class CatalogFormTest {
         CatalogForm.remove("POST", "token", "token", id, service);
         assertTrue(service.entries().isEmpty());
     }
+
+    @Test void addsValidEntryInBuilderMode() {
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("name", "Sweet treat");
+        fields.put("selector", "Food|Sweet");
+        fields.put("format", "XML");
+        fields.put("mode", "builder");
+        fields.put("classification", "52");
+        fields.put("isDefault", "false");
+
+        CatalogForm.add("POST", "token", "token", fields,
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3"),
+            spif,
+            service
+        );
+
+        assertEquals(1, service.entries().size());
+        CatalogEntry entry = service.entries().get(0);
+        assertEquals("Sweet treat", entry.name());
+        assertEquals("Food|Sweet", entry.selector());
+        assertEquals(LabelFormat.XML, entry.format());
+        assertFalse(entry.isDefault());
+        assertTrue(entry.payload().contains("52"));
+    }
+
+    @Test void builderModeRejectsMissingClassificationOrNullSpif() {
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fieldsWithoutCls = new HashMap<>();
+        fieldsWithoutCls.put("name", "Test");
+        fieldsWithoutCls.put("format", "XML");
+        fieldsWithoutCls.put("mode", "builder");
+        fieldsWithoutCls.put("classification", "");
+
+        assertThrows(IllegalArgumentException.class, () ->
+            CatalogForm.add("POST", "token", "token", fieldsWithoutCls, java.util.List.of(), spif, service)
+        );
+
+        Map<String, String> validCls = new HashMap<>();
+        validCls.put("name", "Test");
+        validCls.put("format", "XML");
+        validCls.put("mode", "builder");
+        validCls.put("classification", "52");
+
+        assertThrows(IllegalArgumentException.class, () ->
+            CatalogForm.add("POST", "token", "token", validCls, java.util.List.of(), null, service)
+        );
+    }
+
+    @Test void rawModeRejectsMissingLabelPayload() {
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
+        Map<String, String> fields = new HashMap<>();
+        fields.put("name", "Test");
+        fields.put("format", "XML");
+        fields.put("mode", "raw");
+        fields.put("label", "");
+
+        assertThrows(IllegalArgumentException.class, () ->
+            CatalogForm.add("POST", "token", "token", fields, service)
+        );
+    }
 }

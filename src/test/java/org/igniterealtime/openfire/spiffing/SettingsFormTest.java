@@ -221,5 +221,95 @@ class SettingsFormTest {
         assertTrue(meta.activeClassificationLacvs().contains("52"));
         assertTrue(meta.activeClassificationLacvs().contains("51"));
         assertNotNull(meta.displayMarking());
+        assertEquals("52", meta.activeLabelClassificationLacv());
+        assertTrue(meta.activeLabelCategorySpecs().contains("1.2.826.0.1.6726289.0.0.1|permissive|3"));
+        assertNotNull(meta.defaultLabelDisplayMarking());
+    }
+
+    @Test void buildsLabelFromClassificationAndCategories() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        io.cridland.spiffing.Label label = SettingsForm.buildLabel(
+            spif,
+            "52",
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3", "1.2.826.0.1.6726289.0.0.2|restrictive|0")
+        );
+
+        assertNotNull(label.classification());
+        assertEquals("52", label.classification().lacv().toString());
+        assertEquals(2, label.categories().size());
+
+        String xml = LabelFormat.XML.encode(label);
+        assertTrue(xml.contains("52"));
+        assertTrue(xml.contains("Sweet") || xml.contains("lacv=\"3\"") || xml.contains("lacv='3'"));
+
+        String nato = LabelFormat.NATO.encode(label);
+        assertTrue(nato.contains("ConfidentialityInformation"));
+
+        String ess = LabelFormat.ESS.encode(label);
+        assertNotNull(ess);
+        assertFalse(ess.isBlank());
+    }
+
+    @Test void buildLabelRejectsMissingOrInvalidClassificationOrCategory() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildLabel(spif, null, java.util.List.of())
+        );
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildLabel(spif, "   ", java.util.List.of())
+        );
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildLabel(spif, "invalid-lacv", java.util.List.of())
+        );
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildLabel(spif, "52", java.util.List.of("nonexistent|permissive|999"))
+        );
+    }
+
+    @Test void parsesPolicyInLabelBuilderMode() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("clearanceMode", "raw");
+        fields.put("defaultLabelMode", "builder");
+        fields.put("defaultLabelFormat", "NATO");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(
+            fields,
+            java.util.List.of(),
+            java.util.List.of(),
+            "52",
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3")
+        );
+
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertNotNull(policy.defaultLabel());
+        assertEquals(LabelFormat.NATO, policy.defaultLabelFormat());
+        assertTrue(policy.defaultLabel().contains("ConfidentialityInformation"));
+    }
+
+    @Test void parsesPolicyInLabelBuilderModeWithNoSelection() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("defaultLabelMode", "builder");
+        fields.put("defaultLabelFormat", "XML");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(
+            fields,
+            java.util.List.of(),
+            java.util.List.of(),
+            "",
+            java.util.List.of()
+        );
+
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertNull(policy.defaultLabel());
+        assertNull(policy.defaultLabelFormat());
     }
 }

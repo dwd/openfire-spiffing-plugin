@@ -40,8 +40,23 @@ public final class SettingsForm {
         List<PolicyTagSetInfo> tagSets,
         Set<String> activeClassificationLacvs,
         Set<String> activeCategorySpecs,
-        String displayMarking
-    ) {}
+        String displayMarking,
+        String activeLabelClassificationLacv,
+        Set<String> activeLabelCategorySpecs,
+        String defaultLabelDisplayMarking
+    ) {
+        public PolicyClearanceMetadata(
+            String policyId,
+            String policyName,
+            List<PolicyClassificationInfo> classifications,
+            List<PolicyTagSetInfo> tagSets,
+            Set<String> activeClassificationLacvs,
+            Set<String> activeCategorySpecs,
+            String displayMarking
+        ) {
+            this(policyId, policyName, classifications, tagSets, activeClassificationLacvs, activeCategorySpecs, displayMarking, null, Set.of(), null);
+        }
+    }
 
     public static void validateCsrf(String method, String cookie, String token) {
         if (!"POST".equals(method) || cookie == null || token == null || token.isEmpty()
@@ -51,10 +66,20 @@ public final class SettingsForm {
     }
 
     public static SecurityPolicy parsePolicy(Map<String, String> fields) {
-        return parsePolicy(fields, null, null);
+        return parsePolicy(fields, null, null, null, null);
     }
 
     public static SecurityPolicy parsePolicy(Map<String, String> fields, Collection<String> classifications, Collection<String> categories) {
+        return parsePolicy(fields, classifications, categories, null, null);
+    }
+
+    public static SecurityPolicy parsePolicy(
+        Map<String, String> fields,
+        Collection<String> clearanceClassifications,
+        Collection<String> clearanceCategories,
+        String defaultLabelClassification,
+        Collection<String> defaultLabelCategories
+    ) {
         String spif = fields.get("spif");
         if (spif == null || spif.isBlank()) {
             throw new IllegalArgumentException("SPIF document is required.");
@@ -75,10 +100,10 @@ public final class SettingsForm {
             String clearanceFormatStr = fields.get("clearanceFormat");
             clearanceFormat = clearanceFormatStr != null && !clearanceFormatStr.isBlank()
                 ? LabelFormat.valueOf(clearanceFormatStr) : LabelFormat.XML;
-            boolean hasClassifications = classifications != null && classifications.stream().anyMatch(c -> c != null && !c.isBlank());
-            boolean hasCategories = categories != null && categories.stream().anyMatch(c -> c != null && !c.isBlank());
+            boolean hasClassifications = clearanceClassifications != null && clearanceClassifications.stream().anyMatch(c -> c != null && !c.isBlank());
+            boolean hasCategories = clearanceCategories != null && clearanceCategories.stream().anyMatch(c -> c != null && !c.isBlank());
             if (hasClassifications || hasCategories) {
-                Clearance c = buildClearance(s, classifications, categories);
+                Clearance c = buildClearance(s, clearanceClassifications, clearanceCategories);
                 clearance = clearanceFormat.encode(c);
             } else {
                 clearance = null;
@@ -92,11 +117,28 @@ public final class SettingsForm {
                 ? LabelFormat.valueOf(clearanceFormatStr) : null;
         }
 
-        String defaultLabel = fields.get("defaultLabel");
-        if (defaultLabel != null && defaultLabel.isBlank()) defaultLabel = null;
-        String defaultLabelFormatStr = fields.get("defaultLabelFormat");
-        LabelFormat defaultLabelFormat = defaultLabel != null && defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
-            ? LabelFormat.valueOf(defaultLabelFormatStr) : null;
+        String defaultLabelMode = fields.get("defaultLabelMode");
+        String defaultLabel;
+        LabelFormat defaultLabelFormat;
+
+        if ("builder".equalsIgnoreCase(defaultLabelMode)) {
+            String defaultLabelFormatStr = fields.get("defaultLabelFormat");
+            defaultLabelFormat = defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
+                ? LabelFormat.valueOf(defaultLabelFormatStr) : LabelFormat.XML;
+            if (defaultLabelClassification != null && !defaultLabelClassification.isBlank()) {
+                io.cridland.spiffing.Label l = buildLabel(s, defaultLabelClassification, defaultLabelCategories);
+                defaultLabel = defaultLabelFormat.encode(l);
+            } else {
+                defaultLabel = null;
+                defaultLabelFormat = null;
+            }
+        } else {
+            defaultLabel = fields.get("defaultLabel");
+            if (defaultLabel != null && defaultLabel.isBlank()) defaultLabel = null;
+            String defaultLabelFormatStr = fields.get("defaultLabelFormat");
+            defaultLabelFormat = defaultLabel != null && defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
+                ? LabelFormat.valueOf(defaultLabelFormatStr) : null;
+        }
 
         boolean isDefault = Boolean.parseBoolean(fields.get("isDefault"));
 
@@ -177,6 +219,28 @@ public final class SettingsForm {
         return clearance;
     }
 
+    public static io.cridland.spiffing.Label buildLabel(Spif spif, String classificationLacv, Collection<String> categorySpecs) {
+        Objects.requireNonNull(spif, "spif");
+        if (classificationLacv == null || classificationLacv.isBlank()) {
+            throw new IllegalArgumentException("A classification is required to build a label.");
+        }
+        Lacv lacv;
+        try {
+            lacv = Lacv.parse(classificationLacv.trim());
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("Invalid classification LACV: " + classificationLacv, e);
+        }
+        io.cridland.spiffing.Label label = new io.cridland.spiffing.Label(spif, lacv);
+        if (categorySpecs != null) {
+            for (String spec : categorySpecs) {
+                if (spec == null || spec.isBlank()) continue;
+                Category cat = resolveCategory(spif, spec.trim());
+                label.addCategory(cat);
+            }
+        }
+        return label;
+    }
+
     public static Category resolveCategory(Spif spif, String spec) {
         Objects.requireNonNull(spif, "spif");
         Objects.requireNonNull(spec, "spec");
@@ -211,7 +275,6 @@ public final class SettingsForm {
                     throw new IllegalArgumentException("Tag set not found for id: " + tagSetId);
                 }
                 for (Tag tag : ts.tags()) {
-                    if (tag.type().name().equalsIgnoreCase("informative")) continue;
                     for (Category cat : tag.categories()) {
                         if (cat.lacv().toString().equals(lacv)) {
                             return cat;
@@ -221,10 +284,9 @@ public final class SettingsForm {
             }
         }
 
-        // Fallback: search all tag sets and non-informative tags by category LACV
+        // Fallback: search all tag sets by category LACV or name
         for (TagSet ts : spif.tagSets()) {
             for (Tag tag : ts.tags()) {
-                if (tag.type().name().equalsIgnoreCase("informative")) continue;
                 for (Category cat : tag.categories()) {
                     if (cat.lacv().toString().equals(spec) || cat.name().equalsIgnoreCase(spec)) {
                         return cat;
@@ -240,10 +302,20 @@ public final class SettingsForm {
         if (policy == null || policy.spif() == null || policy.spif().isBlank()) {
             return null;
         }
-        return inspectSpifDocument(policy.spif(), policy.clearance(), policy.clearanceFormat());
+        return inspectSpifDocument(policy.spif(), policy.clearance(), policy.clearanceFormat(), policy.defaultLabel(), policy.defaultLabelFormat());
     }
 
     public static PolicyClearanceMetadata inspectSpifDocument(String spifDocument, String rawClearance, LabelFormat format) {
+        return inspectSpifDocument(spifDocument, rawClearance, format, null, null);
+    }
+
+    public static PolicyClearanceMetadata inspectSpifDocument(
+        String spifDocument,
+        String rawClearance,
+        LabelFormat clearanceFormat,
+        String rawDefaultLabel,
+        LabelFormat defaultLabelFormat
+    ) {
         if (spifDocument == null || spifDocument.isBlank()) return null;
         Site site = new Site();
         Spif spif;
@@ -268,9 +340,6 @@ public final class SettingsForm {
         for (TagSet ts : spif.tagSets()) {
             List<PolicyCategoryInfo> catList = new ArrayList<>();
             for (Tag tag : ts.tags()) {
-                if (tag.type().name().equalsIgnoreCase("informative")) {
-                    continue; // Informative categories are not clearance privileges
-                }
                 for (Category cat : tag.categories()) {
                     String spec = ts.id() + "|" + tag.type().name() + "|" + cat.lacv().toString();
                     catList.add(new PolicyCategoryInfo(
@@ -292,9 +361,9 @@ public final class SettingsForm {
         Set<String> activeSpecs = new LinkedHashSet<>();
         String displayMarking = null;
 
-        if (rawClearance != null && !rawClearance.isBlank() && format != null) {
+        if (rawClearance != null && !rawClearance.isBlank() && clearanceFormat != null) {
             try {
-                Clearance parsed = site.clearance(format.decode(rawClearance), format.format);
+                Clearance parsed = site.clearance(clearanceFormat.decode(rawClearance), clearanceFormat.format);
                 if (parsed != null) {
                     for (Lacv lacv : parsed.classifications()) {
                         activeLacvs.add(lacv.toString());
@@ -308,6 +377,26 @@ public final class SettingsForm {
             }
         }
 
+        String activeLabelClassificationLacv = null;
+        Set<String> activeLabelCategorySpecs = new LinkedHashSet<>();
+        String defaultLabelDisplayMarking = null;
+
+        if (rawDefaultLabel != null && !rawDefaultLabel.isBlank() && defaultLabelFormat != null) {
+            try {
+                io.cridland.spiffing.Label parsedLabel = site.label(defaultLabelFormat.decode(rawDefaultLabel), defaultLabelFormat.format);
+                if (parsedLabel != null) {
+                    if (parsedLabel.classification() != null) {
+                        activeLabelClassificationLacv = parsedLabel.classification().lacv().toString();
+                    }
+                    for (Category cat : parsedLabel.categories()) {
+                        activeLabelCategorySpecs.add(cat.tag().tagSet().id() + "|" + cat.tag().type().name() + "|" + cat.lacv().toString());
+                    }
+                    defaultLabelDisplayMarking = spif.displayMarking(parsedLabel);
+                }
+            } catch (Exception ignored) {
+            }
+        }
+
         return new PolicyClearanceMetadata(
             spif.policyId(),
             spif.name(),
@@ -315,7 +404,10 @@ public final class SettingsForm {
             List.copyOf(tagSetList),
             Collections.unmodifiableSet(activeLacvs),
             Collections.unmodifiableSet(activeSpecs),
-            displayMarking
+            displayMarking,
+            activeLabelClassificationLacv,
+            Collections.unmodifiableSet(activeLabelCategorySpecs),
+            defaultLabelDisplayMarking
         );
     }
 }

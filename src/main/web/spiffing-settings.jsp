@@ -46,10 +46,14 @@
 
                 String[] classifications = request.getParameterValues("clearanceClassifications");
                 String[] categories = request.getParameterValues("clearanceCategories");
+                String defaultLabelClassification = request.getParameter("defaultLabelClassification");
+                String[] defaultLabelCategories = request.getParameterValues("defaultLabelCategories");
                 SecurityPolicy policy = SettingsForm.parsePolicy(
                     fields,
                     classifications != null ? List.of(classifications) : List.of(),
-                    categories != null ? List.of(categories) : List.of()
+                    categories != null ? List.of(categories) : List.of(),
+                    defaultLabelClassification,
+                    defaultLabelCategories != null ? List.of(defaultLabelCategories) : List.of()
                 );
                 configService.savePolicy(policy);
                 response.sendRedirect("spiffing-settings.jsp?saved=true");
@@ -455,14 +459,154 @@
         </div>
 
         <hr style="margin: 20px 0; border: 0; border-top: 1px solid #ddd;"/>
+        <h4>Default Message Label</h4>
+        <p>Optionally configure a default security label for this policy. Unlabelled messages stamped under this policy will receive this label.</p>
+
+        <div style="margin-bottom: 12px; background: #f9f9f9; padding: 10px; border: 1px solid #e5e5e5; border-radius: 4px;">
+            <label style="margin-right: 15px; font-weight: bold;">Configuration Mode:</label>
+            <label style="margin-right: 20px; cursor: pointer;">
+                <input type="radio" name="defaultLabelMode" id="defaultLabelModeBuilder" value="builder" checked="checked" onchange="toggleDefaultLabelMode()"/>
+                <strong>Interactive Builder</strong> (select classification and categories)
+            </label>
+            <label style="cursor: pointer;">
+                <input type="radio" name="defaultLabelMode" id="defaultLabelModeRaw" value="raw" onchange="toggleDefaultLabelMode()"/>
+                <strong>Raw Payload / File Upload</strong> (paste or upload XML/ESS/NATO label)
+            </label>
+        </div>
+
         <p><label for="defaultLabelFormat">Default message label format</label>
             <select id="defaultLabelFormat" name="defaultLabelFormat">
                 <c:forEach var="format" items="${formats}">
                     <option value="${format}" ${empty editingPolicy ? (format eq 'XML' ? 'selected' : '') : (format eq editingPolicy.defaultLabelFormat() ? 'selected' : '')}>${format}</option>
                 </c:forEach>
             </select></p>
-        <p><label for="defaultLabel">Default message label payload (optional, maximum 64 KiB)</label></p>
-        <textarea id="defaultLabel" name="defaultLabel" cols="100" rows="6" maxlength="65536"><c:out value="${empty editingPolicy ? '' : editingPolicy.defaultLabel()}"/></textarea>
+
+        <!-- Builder Mode Container -->
+        <div id="defaultLabelBuilderContainer" style="margin-bottom: 15px;">
+            <c:choose>
+                <c:when test="${not empty editingMetadata}">
+                    <div style="margin-bottom: 12px;">
+                        <p><strong>Classification Level</strong> (select one)</p>
+                        <c:choose>
+                            <c:when test="${empty editingMetadata.classifications()}">
+                                <p style="color: #888;"><em>No classifications defined in policy.</em></p>
+                            </c:when>
+                            <c:otherwise>
+                                <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
+                                    <thead>
+                                        <tr>
+                                            <th width="5%">Select</th>
+                                            <th width="35%">Classification</th>
+                                            <th width="20%">LACV</th>
+                                            <th width="20%">Hierarchy</th>
+                                            <th width="20%">Color</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td>
+                                                <input type="radio" name="defaultLabelClassification" value="" id="edit_label_cls_none"
+                                                    ${empty editingMetadata.activeLabelClassificationLacv() ? 'checked="checked"' : ''}/>
+                                            </td>
+                                            <td colspan="4"><label for="edit_label_cls_none"><em>(None / Unset &mdash; No default label)</em></label></td>
+                                        </tr>
+                                        <c:forEach var="c" items="${editingMetadata.classifications()}" varStatus="clsSt">
+                                            <tr>
+                                                <td>
+                                                    <input type="radio" name="defaultLabelClassification" value="${c.lacv()}" id="edit_label_cls_${clsSt.index}"
+                                                        ${c.lacv() eq editingMetadata.activeLabelClassificationLacv() ? 'checked="checked"' : ''}/>
+                                                </td>
+                                                <td>
+                                                    <label for="edit_label_cls_${clsSt.index}">
+                                                        <strong><c:out value="${c.name()}"/></strong>
+                                                        <c:if test="${c.obsolete()}"><span style="color:#c00;">(Obsolete)</span></c:if>
+                                                    </label>
+                                                </td>
+                                                <td><code><c:out value="${c.lacv()}"/></code></td>
+                                                <td><c:out value="${c.hierarchy()}"/></td>
+                                                <td>
+                                                    <c:if test="${not empty c.color()}">
+                                                        <span style="display:inline-block; width:14px; height:14px; background:<c:out value='${c.color()}'/>; border:1px solid #ccc; vertical-align:middle; margin-right:4px;"></span>
+                                                        <c:out value="${c.color()}"/>
+                                                    </c:if>
+                                                    <c:if test="${empty c.color()}">-</c:if>
+                                                </td>
+                                            </tr>
+                                        </c:forEach>
+                                    </tbody>
+                                </table>
+                            </c:otherwise>
+                        </c:choose>
+                    </div>
+
+                    <div style="margin-bottom: 12px;">
+                        <p><strong>Security Categories and Tag Sets</strong></p>
+                        <c:choose>
+                            <c:when test="${empty editingMetadata.tagSets()}">
+                                <p style="color: #888;"><em>No security categories defined in policy.</em></p>
+                            </c:when>
+                            <c:otherwise>
+                                <c:forEach var="ts" items="${editingMetadata.tagSets()}" varStatus="tsSt">
+                                    <fieldset style="margin-top: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                                        <legend style="font-weight: bold; padding: 0 6px;"><c:out value="${ts.name()}"/> (<code><c:out value="${ts.id()}"/></code>)</legend>
+                                        <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
+                                            <thead>
+                                                <tr>
+                                                    <th width="5%">Include</th>
+                                                    <th width="45%">Category</th>
+                                                    <th width="25%">Tag / Type</th>
+                                                    <th width="25%">LACV</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <c:forEach var="cat" items="${ts.categories()}" varStatus="catSt">
+                                                    <tr>
+                                                        <td>
+                                                            <input type="checkbox" name="defaultLabelCategories" value="${cat.spec()}" id="edit_label_cat_${tsSt.index}_${catSt.index}"
+                                                                ${editingMetadata.activeLabelCategorySpecs().contains(cat.spec()) ? 'checked="checked"' : ''}/>
+                                                        </td>
+                                                        <td><label for="edit_label_cat_${tsSt.index}_${catSt.index}"><c:out value="${cat.name()}"/></label></td>
+                                                        <td><c:out value="${cat.tagName()}"/> (<em><c:out value="${cat.tagType()}"/></em>)</td>
+                                                        <td><code><c:out value="${cat.lacv()}"/></code></td>
+                                                    </tr>
+                                                </c:forEach>
+                                            </tbody>
+                                        </table>
+                                    </fieldset>
+                                </c:forEach>
+                            </c:otherwise>
+                        </c:choose>
+                    </div>
+
+                    <c:if test="${not empty editingMetadata.defaultLabelDisplayMarking()}">
+                        <div style="background: #eef6ff; border: 1px solid #b8daff; padding: 10px; border-radius: 4px; margin-top: 10px;">
+                            <strong>Policy Display Marking for Default Message Label:</strong>
+                            <code style="font-size: 1.1em; color: #004085;"><c:out value="${editingMetadata.defaultLabelDisplayMarking()}"/></code>
+                        </div>
+                    </c:if>
+                </c:when>
+                <c:otherwise>
+                    <div id="dynamicDefaultLabelBuilder">
+                        <p style="color: #666;"><em>Paste or upload an Open XML SPIF document above to populate classification levels and categories.</em></p>
+                    </div>
+                </c:otherwise>
+            </c:choose>
+        </div>
+
+        <!-- Raw Payload Mode Container -->
+        <div id="defaultLabelRawContainer" style="display: none; margin-bottom: 15px;">
+            <p><label for="defaultLabelFile">Upload label file (.xml, .b64, .ber, .der, .txt): </label>
+                <input type="file" id="defaultLabelFile" accept=".xml,.b64,.ber,.der,.txt,text/xml,application/xml,text/plain"/>
+            </p>
+            <p><label for="defaultLabel">Or paste / edit the raw default label payload below (maximum 64 KiB):</label></p>
+            <textarea id="defaultLabel" name="defaultLabel" cols="100" rows="6" maxlength="65536"><c:out value="${empty editingPolicy ? '' : editingPolicy.defaultLabel()}"/></textarea>
+            <c:if test="${not empty editingMetadata and not empty editingMetadata.defaultLabelDisplayMarking()}">
+                <div style="background: #eef6ff; border: 1px solid #b8daff; padding: 8px; border-radius: 4px; margin-top: 8px;">
+                    <strong>Current Policy Display Marking:</strong>
+                    <code style="font-size: 1.05em; color: #004085;"><c:out value="${editingMetadata.defaultLabelDisplayMarking()}"/></code>
+                </div>
+            </c:if>
+        </div>
 
         <p><label for="isDefault">
             <input type="checkbox" id="isDefault" name="isDefault" ${empty editingPolicy ? '' : (editingPolicy.isDefault() ? 'checked' : '')}/>
@@ -655,6 +799,16 @@
         }
     }
 
+    function toggleDefaultLabelMode() {
+        var isBuilder = document.getElementById("defaultLabelModeBuilder").checked;
+        var builderBox = document.getElementById("defaultLabelBuilderContainer");
+        var rawBox = document.getElementById("defaultLabelRawContainer");
+        if (builderBox && rawBox) {
+            builderBox.style.display = isBuilder ? "" : "none";
+            rawBox.style.display = isBuilder ? "none" : "";
+        }
+    }
+
     function togglePeerClearanceMode() {
         var isBuilder = document.getElementById("peerClearanceModeBuilder").checked;
         var builderBox = document.getElementById("peerClearanceBuilderContainer");
@@ -839,24 +993,113 @@
         }
     }
 
+    function parseSpifXmlAndRenderLabelBuilder(spifXml, containerId) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        if (!spifXml || spifXml.trim() === "") {
+            container.innerHTML = "<p style='color:#666;'><em>Paste or upload an Open XML SPIF document above to populate classification levels and categories.</em></p>";
+            return;
+        }
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(spifXml, "text/xml");
+            var parseError = doc.getElementsByTagName("parsererror");
+            if (parseError.length > 0) {
+                container.innerHTML = "<p style='color:#c00;'><em>Invalid SPIF XML syntax. Fix XML above to display the label builder.</em></p>";
+                return;
+            }
+
+            var html = "";
+            var classNodes = doc.querySelectorAll("securityClassification");
+            html += "<div style='margin-bottom:15px;'><p><strong>Classification Level</strong> (select one)</p>";
+            if (classNodes.length === 0) {
+                html += "<p style='color:#888;'><em>No classifications defined in SPIF.</em></p>";
+            } else {
+                html += "<table class='jive-table' cellpadding='3' cellspacing='0' border='0' width='100%'><thead><tr><th width='5%'>Select</th><th width='35%'>Classification</th><th width='20%'>LACV</th><th width='20%'>Hierarchy</th><th width='20%'>Color</th></tr></thead><tbody>";
+                html += "<tr><td><input type='radio' name='defaultLabelClassification' value='' id='dyn_label_cls_none' checked='checked'/></td><td colspan='4'><label for='dyn_label_cls_none'><em>(None / Unset &mdash; No default label)</em></label></td></tr>";
+                for (var i = 0; i < classNodes.length; i++) {
+                    var node = classNodes[i];
+                    var name = node.getAttribute("name") || "";
+                    var lacv = node.getAttribute("lacv") || "";
+                    var hierarchy = node.getAttribute("hierarchy") || "";
+                    var color = node.getAttribute("color") || "";
+                    var id = "dyn_label_cls_" + i;
+                    html += "<tr>";
+                    html += "<td><input type='radio' name='defaultLabelClassification' value='" + escapeHtml(lacv) + "' id='" + id + "'/></td>";
+                    html += "<td><label for='" + id + "'><strong>" + escapeHtml(name) + "</strong></label></td>";
+                    html += "<td><code>" + escapeHtml(lacv) + "</code></td>";
+                    html += "<td>" + escapeHtml(hierarchy) + "</td>";
+                    html += "<td>" + (color ? "<span style='display:inline-block; width:14px; height:14px; background:" + escapeHtml(color) + "; border:1px solid #ccc; vertical-align:middle; margin-right:4px;'></span> " + escapeHtml(color) : "-") + "</td>";
+                    html += "</tr>";
+                }
+                html += "</tbody></table>";
+            }
+            html += "</div>";
+
+            var tagSetNodes = doc.querySelectorAll("securityCategoryTagSet");
+            html += "<div style='margin-bottom:15px;'><p><strong>Security Categories and Tag Sets</strong></p>";
+            var hasCategories = false;
+            if (tagSetNodes.length > 0) {
+                for (var s = 0; s < tagSetNodes.length; s++) {
+                    var tsNode = tagSetNodes[s];
+                    var tsId = tsNode.getAttribute("id") || "";
+                    var tsName = tsNode.getAttribute("name") || tsId;
+                    var tagNodes = tsNode.querySelectorAll("securityCategoryTag");
+                    for (var t = 0; t < tagNodes.length; t++) {
+                        var tagNode = tagNodes[t];
+                        var tagType = tagNode.getAttribute("tagType") || tagNode.getAttribute("type") || "";
+                        var tagName = tagNode.getAttribute("name") || tagType;
+                        var catNodes = tagNode.querySelectorAll("securityCategory");
+                        if (catNodes.length > 0) {
+                            hasCategories = true;
+                            html += "<fieldset style='margin-top:8px; margin-bottom:10px; padding:10px; border:1px solid #ddd; border-radius:4px;'><legend style='font-weight:bold; padding:0 6px;'>" + escapeHtml(tsName) + " &mdash; " + escapeHtml(tagName) + " (<em>" + escapeHtml(tagType) + "</em>)</legend><table class='jive-table' cellpadding='3' cellspacing='0' border='0' width='100%'><thead><tr><th width='5%'>Include</th><th width='45%'>Category</th><th width='25%'>Tag / Type</th><th width='25%'>LACV</th></tr></thead><tbody>";
+                            for (var c = 0; c < catNodes.length; c++) {
+                                var catNode = catNodes[c];
+                                var catName = catNode.getAttribute("name") || "";
+                                var catLacv = catNode.getAttribute("lacv") || "";
+                                var spec = tsId + "|" + tagType + "|" + catLacv;
+                                var catId = "dyn_label_cat_" + s + "_" + t + "_" + c;
+                                html += "<tr>";
+                                html += "<td><input type='checkbox' name='defaultLabelCategories' value='" + escapeHtml(spec) + "' id='" + catId + "'/></td>";
+                                html += "<td><label for='" + catId + "'>" + escapeHtml(catName) + "</label></td>";
+                                html += "<td>" + escapeHtml(tagName) + " (<em>" + escapeHtml(tagType) + "</em>)</td>";
+                                html += "<td><code>" + escapeHtml(catLacv) + "</code></td>";
+                                html += "</tr>";
+                            }
+                            html += "</tbody></table></fieldset>";
+                        }
+                    }
+                }
+            }
+            if (!hasCategories) {
+                html += "<p style='color:#888;'><em>No security categories defined in SPIF.</em></p>";
+            }
+            html += "</div>";
+            container.innerHTML = html;
+        } catch (e) {
+            container.innerHTML = "<p style='color:#c00;'><em>Failed to parse SPIF: " + escapeHtml(e.message) + "</em></p>";
+        }
+    }
+
     document.addEventListener("DOMContentLoaded", function() {
         setupClearanceFileUpload("clearanceFile", "clearance", "clearanceFormat");
+        setupClearanceFileUpload("defaultLabelFile", "defaultLabel", "defaultLabelFormat");
         setupClearanceFileUpload("peerClearanceFile", "peerClearance", "peerClearanceFormat");
 
         var spifTextarea = document.getElementById("spif");
         if (spifTextarea) {
-            spifTextarea.addEventListener("input", function() {
+            function updateDynamicBuilders() {
                 if (document.getElementById("dynamicClearanceBuilder")) {
                     parseSpifXmlAndRenderBuilder(spifTextarea.value, "dynamicClearanceBuilder");
                 }
-            });
-            spifTextarea.addEventListener("change", function() {
-                if (document.getElementById("dynamicClearanceBuilder")) {
-                    parseSpifXmlAndRenderBuilder(spifTextarea.value, "dynamicClearanceBuilder");
+                if (document.getElementById("dynamicDefaultLabelBuilder")) {
+                    parseSpifXmlAndRenderLabelBuilder(spifTextarea.value, "dynamicDefaultLabelBuilder");
                 }
-            });
-            if (document.getElementById("dynamicClearanceBuilder") && spifTextarea.value.trim().length > 0) {
-                parseSpifXmlAndRenderBuilder(spifTextarea.value, "dynamicClearanceBuilder");
+            }
+            spifTextarea.addEventListener("input", updateDynamicBuilders);
+            spifTextarea.addEventListener("change", updateDynamicBuilders);
+            if (spifTextarea.value.trim().length > 0) {
+                updateDynamicBuilders();
             }
         }
     });

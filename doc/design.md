@@ -889,6 +889,38 @@ using an interactive visual builder in addition to raw payload uploads:
   `LabelFormat.encode(Clearance)` (supporting XML, NATO XML, and Base64 ESS DER). Validation
   rejects malformed LACVs, unknown specs, or informative category assignments.
 
+## Label UX and interactive builder
+
+Administrators can configure policy default message labels (`spiffing-settings.jsp`) and
+catalogue label entries (`spiffing-catalog.jsp`) using an interactive visual builder and file upload
+in addition to raw payload input:
+
+- **Dual configuration mode**: both default message label configuration and catalogue entry addition
+  provide a toggle between **Interactive Builder** and **Raw Payload / File Upload** modes.
+- **Visual label builder**:
+  - Classification selection: single-choice radio buttons displaying classification names, LACVs,
+    hierarchy levels, and color swatches. In policy default label settings, a "(None / Unset)" option
+    allows leaving the policy default label unset.
+  - Security categories: grouped fieldsets displaying tag sets and non-informative/informative
+    categories with tag types and LACVs.
+  - Live policy display marking: active default labels and catalogue entries show the policy-derived
+    human-readable marking (`displayMarking(Label)`).
+  - In catalogue entry management, administrators can select which active security policy to build the
+    label from.
+- **File upload and drag-and-drop**:
+  - File inputs (`#defaultLabelFile`, `#catalogLabelFile`) and drop zones support `.xml`, `.b64`,
+    `.ber`, `.der`, and `.txt` files (bounded to 64 KiB).
+  - Binary DER/BER labels are automatically Base64-encoded with ESS format selection, and XML/NATO
+    documents are auto-detected.
+- **Backend label construction**:
+  - `SettingsForm.buildLabel` creates `io.cridland.spiffing.Label` instances from SPIF policies,
+    classification LACVs, and category specs, serializing to XML, NATO XML, or ESS formats via
+    `LabelFormat.encode(Label)`.
+  - `CatalogForm.add` parses builder mode parameters (`classification`, `catalogCategories`, `spif`)
+    to construct and encode catalogue labels before saving to `CatalogService`.
+  - `SettingsForm.inspectPolicy` extracts active default label classifications, categories, and display
+    markings into `PolicyClearanceMetadata`.
+
 ## Deferred features
 
 Per-user and per-room clearances; a distinct clearance per specific federated
