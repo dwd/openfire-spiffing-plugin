@@ -94,4 +94,132 @@ class SettingsFormTest {
         assertEquals(LabelFormat.XML, pc.format());
         assertNotNull(pc.id());
     }
+
+    @Test void buildsClearanceFromClassificationsAndCategories() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        io.cridland.spiffing.Clearance clearance = SettingsForm.buildClearance(
+            spif,
+            java.util.List.of("52", "51"),
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3", "1.2.826.0.1.6726289.0.0.2|restrictive|0")
+        );
+
+        assertTrue(clearance.hasClassification(52));
+        assertTrue(clearance.hasClassification(51));
+        assertFalse(clearance.hasClassification(50));
+        assertEquals(2, clearance.classifications().size());
+        assertEquals(2, clearance.categories().size());
+
+        String xml = LabelFormat.XML.encode(clearance);
+        assertTrue(xml.contains("<classification lacv=\"52\"") || xml.contains("<classification lacv='52'"));
+        assertTrue(xml.contains("Sweet") || xml.contains("lacv=\"3\"") || xml.contains("lacv='3'"));
+
+        String nato = LabelFormat.NATO.encode(clearance);
+        assertTrue(nato.contains("ConfidentialityClearance"));
+
+        String ess = LabelFormat.ESS.encode(clearance);
+        assertNotNull(ess);
+        assertFalse(ess.isBlank());
+    }
+
+    @Test void buildClearanceRejectsInvalidLacvOrCategory() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildClearance(spif, java.util.List.of("not-a-number"), java.util.List.of())
+        );
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildClearance(spif, java.util.List.of(), java.util.List.of("invalid|spec|999"))
+        );
+    }
+
+    @Test void parsesPolicyInBuilderMode() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("clearanceMode", "builder");
+        fields.put("clearanceFormat", "XML");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(
+            fields,
+            java.util.List.of("52"),
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3")
+        );
+
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertNotNull(policy.clearance());
+        assertEquals(LabelFormat.XML, policy.clearanceFormat());
+        assertTrue(policy.clearance().contains("52"));
+    }
+
+    @Test void parsesPolicyInBuilderModeWithNoSelections() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("clearanceMode", "builder");
+        fields.put("clearanceFormat", "XML");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(
+            fields,
+            java.util.List.of(),
+            java.util.List.of()
+        );
+
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertNull(policy.clearance());
+        assertNull(policy.clearanceFormat());
+    }
+
+    @Test void parsesPeerClearanceInBuilderMode() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("domain", "federated.example");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("clearanceMode", "builder");
+        fields.put("format", "NATO");
+
+        PeerClearance pc = SettingsForm.parsePeerClearance(
+            fields,
+            java.util.List.of("52"),
+            java.util.List.of(),
+            spif
+        );
+
+        assertEquals("federated.example", pc.domain());
+        assertEquals("1.2.826.0.1.6726289.0.0", pc.policyId());
+        assertEquals(LabelFormat.NATO, pc.format());
+        assertTrue(pc.clearance().contains("ConfidentialityClearance"));
+    }
+
+    @Test void parsesPeerClearanceInBuilderModeWithNoSelectionsThrows() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("domain", "federated.example");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("clearanceMode", "builder");
+        fields.put("format", "XML");
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.parsePeerClearance(fields, java.util.List.of(), java.util.List.of(), spif)
+        );
+    }
+
+    @Test void inspectsPolicyAndExtractsMetadata() {
+        SecurityPolicy policy = Fixtures.foodPolicy();
+        SettingsForm.PolicyClearanceMetadata meta = SettingsForm.inspectPolicy(policy);
+
+        assertNotNull(meta);
+        assertEquals("1.2.826.0.1.6726289.0.0", meta.policyId());
+        assertEquals("Food", meta.policyName());
+        assertFalse(meta.classifications().isEmpty());
+        assertFalse(meta.tagSets().isEmpty());
+        assertTrue(meta.activeClassificationLacvs().contains("52"));
+        assertTrue(meta.activeClassificationLacvs().contains("51"));
+        assertNotNull(meta.displayMarking());
+    }
 }

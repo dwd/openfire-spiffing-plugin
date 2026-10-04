@@ -861,6 +861,34 @@ the XML text directly:
   populating the form, and server-side validation (`SettingsForm.parsePolicy`) continues to
   enforce SPIF schema validity and database persistence via `ConfigurationService`.
 
+## Clearance UX and interactive builder
+
+Administrators can configure server clearances and peer clearances on `spiffing-settings.jsp`
+using an interactive visual builder in addition to raw payload uploads:
+
+- **Dual configuration mode**: both the policy editing box and peer clearance section offer a
+  toggle between **Interactive Builder** (visual checklist) and **Raw Payload / File Upload** mode.
+- **Visual classification and category selection**:
+  - Classifications: checklists displaying policy classification names, LACVs, hierarchy levels,
+    and visual color swatches.
+  - Security categories: grouped fieldsets displaying tag sets, tag names, tag types (permissive,
+    restrictive, enumerated), and category names with LACVs. Informative tags/categories are
+    excluded since Spiffing does not permit informative tags as clearance privileges.
+- **Dynamic and pre-rendered inspection**:
+  - When editing existing policies, `SettingsForm.inspectPolicy` pre-populates active classification
+    and category selections and policy display markings (`displayMarking(Clearance)`).
+  - When creating a new policy or modifying the SPIF textarea, client-side DOM parsing dynamically
+    extracts classification levels and security categories in real time.
+- **File upload and drag-and-drop**:
+  - File pickers (`#clearanceFile`, `#peerClearanceFile`) and drop zones support `.xml`, `.b64`,
+    `.ber`, `.der`, and `.txt` files (bounded to 64 KiB).
+  - Binary DER/BER files are read as array buffers and automatically encoded to Base64 with ESS
+    format selection; XML files are read as text with automatic NATO/XML format detection.
+- **Backend clearance construction**: `SettingsForm.buildClearance` programmatically constructs
+  `io.cridland.spiffing.Clearance` objects from submitted selections and encodes them via
+  `LabelFormat.encode(Clearance)` (supporting XML, NATO XML, and Base64 ESS DER). Validation
+  rejects malformed LACVs, unknown specs, or informative category assignments.
+
 ## Deferred features
 
 Per-user and per-room clearances; a distinct clearance per specific federated
