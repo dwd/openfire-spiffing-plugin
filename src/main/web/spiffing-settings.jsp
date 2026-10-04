@@ -221,7 +221,59 @@
     <input type="hidden" name="action" value="savePolicy"/>
     <admin:contentBox title="${empty editingPolicy ? 'Add Security Policy' : 'Update Security Policy'}">
         <p><label for="spif"><strong>Open XML SPIF document</strong> (required, maximum 1 MiB)</label></p>
+        <p><label for="spifFile">Upload SPIF file: </label>
+            <input type="file" id="spifFile" accept=".xml,.spif,text/xml,application/xml"/>
+        </p>
+        <p><label for="spif">Or paste / edit the Open XML SPIF document below:</label></p>
         <textarea id="spif" name="spif" cols="100" rows="14" maxlength="1048576" required><c:out value="${empty editingPolicy ? '' : editingPolicy.spif()}"/></textarea>
+        <script type="text/javascript">
+            document.addEventListener("DOMContentLoaded", function() {
+                var spifFileInput = document.getElementById("spifFile");
+                var spifTextarea = document.getElementById("spif");
+                if (spifFileInput && spifTextarea) {
+                    spifFileInput.addEventListener("change", function(e) {
+                        var file = e.target.files && e.target.files[0];
+                        if (file) {
+                            if (file.size > 1048576) {
+                                alert("The selected file exceeds the 1 MiB limit.");
+                                spifFileInput.value = "";
+                                return;
+                            }
+                            var reader = new FileReader();
+                            reader.onload = function(evt) {
+                                spifTextarea.value = evt.target.result;
+                            };
+                            reader.onerror = function() {
+                                alert("Failed to read the selected file.");
+                            };
+                            reader.readAsText(file, "UTF-8");
+                        }
+                    });
+
+                    spifTextarea.addEventListener("dragover", function(e) {
+                        e.preventDefault();
+                    });
+                    spifTextarea.addEventListener("drop", function(e) {
+                        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                            e.preventDefault();
+                            var file = e.dataTransfer.files[0];
+                            if (file.size > 1048576) {
+                                alert("The dropped file exceeds the 1 MiB limit.");
+                                return;
+                            }
+                            var reader = new FileReader();
+                            reader.onload = function(evt) {
+                                spifTextarea.value = evt.target.result;
+                            };
+                            reader.onerror = function() {
+                                alert("Failed to read the dropped file.");
+                            };
+                            reader.readAsText(file, "UTF-8");
+                        }
+                    });
+                }
+            });
+        </script>
 
         <p><label for="clearanceFormat">Server clearance format</label>
             <select id="clearanceFormat" name="clearanceFormat">

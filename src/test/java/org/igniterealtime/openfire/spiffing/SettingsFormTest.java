@@ -58,6 +58,28 @@ class SettingsFormTest {
         assertThrows(IllegalArgumentException.class, () -> SettingsForm.parsePolicy(fields));
     }
 
+    @Test void missingOrBlankSpifThrows() {
+        Map<String, String> missing = new HashMap<>();
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parsePolicy(missing));
+
+        Map<String, String> empty = new HashMap<>();
+        empty.put("spif", "");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parsePolicy(empty));
+
+        Map<String, String> blank = new HashMap<>();
+        blank.put("spif", "   \n\t  ");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parsePolicy(blank));
+    }
+
+    @Test void parsesPolicyWithSurroundingWhitespace() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", "\n  " + Fixtures.read("food-policy") + "\n  ");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(fields);
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertEquals("Food", policy.name());
+    }
+
     @Test void parsesPeerClearance() {
         Map<String, String> fields = new HashMap<>();
         fields.put("domain", "example.com");

@@ -33,7 +33,8 @@ September 25, 2026 (see "Build and dependency compatibility" below). The
 plugin's `provided`/parent dependency was moved from Openfire 5.0.0 to
 5.2.0-SNAPSHOT (no released 5.2.0 exists yet), which also raised the pinned
 Bouncy Castle version to 1.84, on September 25, 2026 (see "Build and
-dependency compatibility" below).
+dependency compatibility" below). Direct file upload for SPIF policies was
+added to the Admin Console on October 4, 2026 (see "SPIF file upload" below).
 
 ## Objective and confirmed requirements
 
@@ -843,6 +844,22 @@ unregisters both on destroy. The plugin's `Runtime` interface's
 `addIqHandler`/`removeIqHandler` methods were generalized from taking a
 `CatalogIqHandler` specifically to the common `IQHandler` supertype, so both
 handlers share the same registration methods.
+
+## SPIF file upload
+
+Administrators can supply Open XML SPIF policy documents on the Admin Console
+settings page (`spiffing-settings.jsp`) either by uploading a file or by pasting/editing
+the XML text directly:
+
+- **File picker and drag-and-drop**: a file input (`#spifFile`, accepting `.xml` and `.spif`
+  files) and drop listener on the document textarea (`#spif`) read the selected SPIF file
+  directly in the browser using the HTML5 `FileReader` API.
+- **Immediate inspection and editing**: the loaded file content is populated into the
+  textarea, allowing administrators to inspect, verify, or adjust the XML before submitting
+  the form.
+- **Client and server validation**: the client validates the 1 MiB size limit before
+  populating the form, and server-side validation (`SettingsForm.parsePolicy`) continues to
+  enforce SPIF schema validity and database persistence via `ConfigurationService`.
 
 ## Deferred features
 
