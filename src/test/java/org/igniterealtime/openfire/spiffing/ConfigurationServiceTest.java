@@ -1,118 +1,212 @@
 package org.igniterealtime.openfire.spiffing;
 
 import org.junit.jupiter.api.Test;
-import java.util.concurrent.*;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class ConfigurationServiceTest {
-    static final class Store implements ConfigurationService.Store {
-        Settings value;
-        int writes;
-        boolean fail;
-        public Settings read() { return value; }
-        public void write(Settings value) {
+    static class InMemoryPolicyStore implements PolicyStore {
+        final Map<String, SecurityPolicy> policies = new LinkedHashMap<>();
+        final Map<String, PeerClearance> peerClearances = new LinkedHashMap<>();
+        int writes = 0;
+        boolean fail = false;
+
+        @Override
+        public List<SecurityPolicy> listPolicies() {
+            return new ArrayList<>(policies.values());
+        }
+
+        @Override
+        public Optional<SecurityPolicy> getPolicy(String id) {
+            return Optional.ofNullable(policies.get(id));
+        }
+
+        @Override
+        public void savePolicy(SecurityPolicy policy) {
             if (fail) throw new IllegalStateException("storage unavailable");
-            this.value = value;
+            policies.put(policy.id(), policy);
+            writes++;
+        }
+
+        @Override
+        public void deletePolicy(String id) {
+            if (fail) throw new IllegalStateException("storage unavailable");
+            policies.remove(id);
+            peerClearances.values().removeIf(pc -> pc.policyId().equals(id));
+            writes++;
+        }
+
+        @Override
+        public void setDefaultPolicy(String id) {
+            if (fail) throw new IllegalStateException("storage unavailable");
+            for (String key : policies.keySet()) {
+                SecurityPolicy p = policies.get(key);
+                policies.put(key, new SecurityPolicy(p.id(), p.name(), p.spif(), p.clearance(), p.clearanceFormat(), p.defaultLabel(), p.defaultLabelFormat(), p.id().equals(id)));
+            }
+            writes++;
+        }
+
+        @Override
+        public List<PeerClearance> listPeerClearances() {
+            return new ArrayList<>(peerClearances.values());
+        }
+
+        @Override
+        public void savePeerClearance(PeerClearance peerClearance) {
+            if (fail) throw new IllegalStateException("storage unavailable");
+            peerClearances.put(peerClearance.id(), peerClearance);
+            writes++;
+        }
+
+        @Override
+        public void deletePeerClearance(String id) {
+            if (fail) throw new IllegalStateException("storage unavailable");
+            peerClearances.remove(id);
             writes++;
         }
     }
 
-    @Test void savesAndLoadsValidatedConfiguration() {
-        var store = new Store();
+    @Test void savesAndLoadsValidatedPolicy() {
+        var store = new InMemoryPolicyStore();
         var service = new ConfigurationService(store);
         service.reload();
         assertNull(service.current());
-        service.save(Fixtures.settings());
+
+        service.savePolicy(Fixtures.foodPolicy());
         assertEquals(1, store.writes);
-        assertEquals(Fixtures.settings(), service.current().settings());
+        assertNotNull(service.current());
+        assertTrue(service.current().hasPolicies());
+        assertTrue(service.current().hasClearance());
+        assertTrue(service.current().hasDefaultLabel());
+
         var restored = new ConfigurationService(store);
         restored.reload();
         assertEquals(service.current().defaultEnvelope().asXML(), restored.current().defaultEnvelope().asXML());
     }
 
     @Test void neverConfiguredIsNotCorrupted() {
-        var store = new Store();
+        var store = new InMemoryPolicyStore();
         var service = new ConfigurationService(store);
         service.reload();
         assertNull(service.current());
         assertFalse(service.isCorrupted());
     }
 
-    @Test void invalidUpdatePreservesSavedAndActiveConfiguration() {
-        var store = new Store();
+    @Test void allowsPartialConfigurationWithNullClearanceAndDefaultLabel() {
+        var store = new InMemoryPolicyStore();
         var service = new ConfigurationService(store);
-        service.save(Fixtures.settings());
+        SecurityPolicy partial = new SecurityPolicy(Fixtures.foodPolicy().id(), "Food", Fixtures.read("food-policy"), null, null, null, null, false);
+        service.savePolicy(partial);
+        assertNotNull(service.current());
+        assertTrue(service.current().hasPolicies());
+        assertFalse(service.current().hasClearance());
+        assertFalse(service.current().hasDefaultLabel());
+        assertNull(service.current().defaultEnvelope());
+    }
+
+    @Test void allowsUpdatingExistingPolicySpifAndClearance() {
+        var store = new InMemoryPolicyStore();
+        var service = new ConfigurationService(store);
+        service.savePolicy(Fixtures.foodPolicy(null, null));
+        assertFalse(service.current().hasClearance());
+
+        // Update SPIF and add clearance
+        service.savePolicy(Fixtures.foodPolicy());
+        assertTrue(service.current().hasClearance());
+        assertTrue(service.current().hasDefaultLabel());
+    }
+
+    @Test void invalidPolicyUpdatePreservesSavedAndActiveConfiguration() {
+        var store = new InMemoryPolicyStore();
+        var service = new ConfigurationService(store);
+        service.savePolicy(Fixtures.foodPolicy());
         var before = service.current();
-        Settings persisted = store.value;
-        var s = Fixtures.settings();
-        assertThrows(IllegalArgumentException.class, () -> service.save(new Settings(s.policy(), s.clearance(), s.clearanceFormat(),
-            Fixtures.read("food-label-water"), s.labelFormat(), s.outputFormat())));
+        SecurityPolicy invalid = new SecurityPolicy(Fixtures.foodPolicy().id(), "Food", Fixtures.read("food-policy"),
+            Fixtures.read("food-clearance-all-okay"), LabelFormat.XML, Fixtures.read("food-label-water"), LabelFormat.XML, true);
+        assertThrows(IllegalArgumentException.class, () -> service.savePolicy(invalid));
         assertSame(before, service.current());
-        assertEquals(persisted, store.value);
         assertEquals(1, store.writes);
     }
 
     @Test void persistenceFailureDoesNotPublishCandidate() {
-        var store = new Store();
+        var store = new InMemoryPolicyStore();
         var service = new ConfigurationService(store);
-        service.save(Fixtures.settings());
+        service.savePolicy(Fixtures.foodPolicy());
         var before = service.current();
         store.fail = true;
-        assertThrows(IllegalStateException.class, () -> service.save(Fixtures.settings(LabelFormat.XML)));
+        assertThrows(IllegalStateException.class, () -> service.savePolicy(Fixtures.drinkPolicy()));
         assertSame(before, service.current());
     }
 
-    @Test void invalidOrDeletedPersistedConfigurationFailsClosedAndCanRecover() {
-        var store = new Store();
+    @Test void invalidPersistedPolicyFailsClosedAndCanRecover() {
+        var store = new InMemoryPolicyStore();
         var service = new ConfigurationService(store);
-        service.save(Fixtures.settings());
-        var s = Fixtures.settings();
-        // Simulate corrupted stored settings, e.g. a policy edited outside the Admin Console.
-        store.value = new Settings("not a valid Open XML SPIF", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
+        service.savePolicy(Fixtures.foodPolicy());
+        // Corrupt stored SPIF
+        store.policies.put(Fixtures.foodPolicy().id(), new SecurityPolicy(Fixtures.foodPolicy().id(), "Corrupt", "not a valid SPIF", null, null, null, null, false));
         assertThrows(IllegalArgumentException.class, service::reload);
         assertNull(service.current());
         assertTrue(service.isCorrupted());
-        service.save(Fixtures.settings());
-        assertNotNull(service.current());
-        assertFalse(service.isCorrupted());
-        store.value = null;
+
+        // Fix stored policy
+        store.policies.put(Fixtures.foodPolicy().id(), Fixtures.foodPolicy());
         service.reload();
-        assertNull(service.current());
+        assertNotNull(service.current());
         assertFalse(service.isCorrupted());
     }
 
-    @Test void rejectsBlankAndOversizedSettings() {
-        var s = Fixtures.settings();
-        assertThrows(IllegalArgumentException.class, () -> new Settings(" ", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat()));
-        assertThrows(IllegalArgumentException.class, () -> new Settings("x".repeat(SecureXml.MAX_DOCUMENT + 1), s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat()));
-        assertThrows(IllegalArgumentException.class, () -> new Settings(s.policy(), s.clearance(), s.clearanceFormat(), "x".repeat(SecureXml.MAX_LABEL + 1), s.labelFormat(), s.outputFormat()));
+    @Test void savesAndDeletesPeerClearance() {
+        var store = new InMemoryPolicyStore();
+        var service = new ConfigurationService(store);
+        service.savePolicy(Fixtures.foodPolicy());
+        PeerClearance pc = new PeerClearance("pc1", "example.com", Fixtures.foodPolicy().id(), Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        service.savePeerClearance(pc);
+        assertTrue(service.current().hasPeerClearance());
+        assertEquals(1, service.peerClearances().size());
+
+        service.deletePeerClearance("pc1");
+        assertFalse(service.current().hasPeerClearance());
+        assertEquals(0, service.peerClearances().size());
     }
 
     @Test void readersSeePreviousCompleteSnapshotUntilSaveFinishes() throws Exception {
         var started = new CountDownLatch(1);
         var release = new CountDownLatch(1);
-        var store = new ConfigurationService.Store() {
-            public Settings read() { return Fixtures.settings(); }
-            public void write(Settings value) {
-                started.countDown();
-                try {
-                    if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("timeout");
-                } catch (InterruptedException e) { throw new AssertionError(e); }
+        var store = new InMemoryPolicyStore() {
+            @Override
+            public void savePolicy(SecurityPolicy policy) {
+                if (started.getCount() > 0) {
+                    started.countDown();
+                    try {
+                        if (!release.await(5, TimeUnit.SECONDS)) throw new AssertionError("timeout");
+                    } catch (InterruptedException e) { throw new AssertionError(e); }
+                }
+                super.savePolicy(policy);
             }
         };
+        store.policies.put(Fixtures.foodPolicy().id(), Fixtures.foodPolicy());
         var service = new ConfigurationService(store);
         service.reload();
         var before = service.current();
         var executor = Executors.newSingleThreadExecutor();
         try {
-            var saved = executor.submit(() -> service.save(Fixtures.settings(LabelFormat.XML)));
+            var saved = executor.submit(() -> service.savePolicy(Fixtures.drinkPolicy()));
             try {
                 assertTrue(started.await(5, TimeUnit.SECONDS));
                 assertSame(before, service.current());
                 assertDoesNotThrow(() -> before.check(before.defaultEnvelope()));
             } finally { release.countDown(); }
             saved.get(5, TimeUnit.SECONDS);
-            assertEquals(LabelFormat.XML, service.current().settings().outputFormat());
+            assertEquals(2, service.policies().size());
         } finally {
             executor.shutdown();
         }

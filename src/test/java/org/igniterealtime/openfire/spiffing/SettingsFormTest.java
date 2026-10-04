@@ -3,113 +3,73 @@ package org.igniterealtime.openfire.spiffing;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import java.util.*;
+
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 class SettingsFormTest {
-    private Map<String, String> fields() {
-        var s = Fixtures.settings();
-        return new HashMap<>(Map.of("policy", s.policy(), "clearance", s.clearance(), "label", s.defaultLabel(),
-            "clearanceFormat", "XML", "labelFormat", "XML", "outputFormat", "ESS"));
-    }
-
     @ParameterizedTest @CsvSource({"GET,token,token", "POST,,token", "POST,token,", "POST,token,wrong", "POST,'',''"})
-    void csrfOrMethodFailureCannotSave(String method, String cookie, String token) {
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save(method, cookie, token, fields(), s -> fail("must not save")));
+    void csrfOrMethodFailureThrows(String method, String cookie, String token) {
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.validateCsrf(method, cookie, token));
     }
 
-    @Test void validSubmissionIsSaved() {
-        List<Settings> saved = new ArrayList<>();
-        SettingsForm.save("POST", "token", "token", fields(), saved::add);
-        // The "enforcementMode" field is absent, as in a form saved before this switch existed; it defaults to "warn".
-        assertEquals(List.of(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN)), saved);
+    @Test void validCsrfPasses() {
+        assertDoesNotThrow(() -> SettingsForm.validateCsrf("POST", "secret", "secret"));
     }
 
-    @Test void explicitEnforcementModeIsSaved() {
-        List<Settings> saved = new ArrayList<>();
-        var withMode = fields();
-        withMode.put("enforcementMode", "ENFORCE");
-        SettingsForm.save("POST", "token", "token", withMode, saved::add);
-        assertEquals(List.of(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE)), saved);
+    @Test void parsesValidPolicy() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("clearance", Fixtures.read("food-clearance-all-okay"));
+        fields.put("clearanceFormat", "XML");
+        fields.put("defaultLabel", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("defaultLabelFormat", "XML");
+        fields.put("isDefault", "true");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(fields);
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertEquals("Food", policy.name());
+        assertEquals(Fixtures.read("food-clearance-all-okay"), policy.clearance());
+        assertEquals(LabelFormat.XML, policy.clearanceFormat());
+        assertEquals(Fixtures.read("food-label-milk-chocolate"), policy.defaultLabel());
+        assertEquals(LabelFormat.XML, policy.defaultLabelFormat());
+        assertTrue(policy.isDefault());
     }
 
-    @Test void missingStripDefaultLabelFieldMeansDisabledAsForAnUncheckedCheckbox() {
-        // A checkbox is absent from the submission entirely when unchecked, just like the "enforcementMode" field
-        // being absent for a form saved before that switch existed.
-        List<Settings> saved = new ArrayList<>();
-        SettingsForm.save("POST", "token", "token", fields(), saved::add);
-        assertFalse(saved.get(0).stripDefaultLabelForFederation());
+    @Test void parsesPolicyWithNullClearanceAndDefaultLabel() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(fields);
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertEquals("Food", policy.name());
+        assertNull(policy.clearance());
+        assertNull(policy.clearanceFormat());
+        assertNull(policy.defaultLabel());
+        assertNull(policy.defaultLabelFormat());
+        assertFalse(policy.isDefault());
     }
 
-    @Test void explicitStripDefaultLabelForFederationIsSaved() {
-        List<Settings> saved = new ArrayList<>();
-        var withStrip = fields();
-        withStrip.put("stripDefaultLabelForFederation", "true");
-        SettingsForm.save("POST", "token", "token", withStrip, saved::add);
-        assertTrue(saved.get(0).stripDefaultLabelForFederation());
+    @Test void invalidSpifThrows() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", "not a valid spif");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parsePolicy(fields));
     }
 
-    @Test void missingPeerClearanceFieldsMeanNoPeerClearanceIsConfigured() {
-        // A form saved before this feature existed has neither field; both are optional.
-        List<Settings> saved = new ArrayList<>();
-        SettingsForm.save("POST", "token", "token", fields(), saved::add);
-        assertEquals("", saved.get(0).peerClearance());
-        assertEquals(LabelFormat.ESS, saved.get(0).peerClearanceFormat());
-    }
+    @Test void parsesPeerClearance() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("domain", "example.com");
+        fields.put("policyId", "1.3.6.1.4.1.5923.99.1");
+        fields.put("clearance", Fixtures.read("food-clearance-all-okay"));
+        fields.put("format", "XML");
 
-    @Test void explicitPeerClearanceIsSaved() {
-        List<Settings> saved = new ArrayList<>();
-        var withPeerClearance = fields();
-        withPeerClearance.put("peerClearance", Fixtures.read("food-clearance-lactose-intolerant"));
-        withPeerClearance.put("peerClearanceFormat", "XML");
-        SettingsForm.save("POST", "token", "token", withPeerClearance, saved::add);
-        assertEquals(Fixtures.read("food-clearance-lactose-intolerant"), saved.get(0).peerClearance());
-        assertEquals(LabelFormat.XML, saved.get(0).peerClearanceFormat());
-    }
-
-    @Test void missingOrInvalidFieldsCannotSave() {
-        for (String key : fields().keySet()) {
-            var missing = fields();
-            missing.remove(key);
-            assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", missing, s -> fail("must not save")));
-        }
-        var invalid = fields();
-        invalid.put("outputFormat", "ANY");
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", invalid, s -> fail("must not save")));
-        var invalidMode = fields();
-        invalidMode.put("enforcementMode", "ANY");
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", invalidMode, s -> fail("must not save")));
-    }
-
-    @Test void formUsesPolicyValidationBeforePersistence() {
-        var store = new ConfigurationServiceTest.Store();
-        var service = new ConfigurationService(store);
-        var denied = fields();
-        denied.put("label", Fixtures.read("food-label-water"));
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", denied, service::save));
-        assertEquals(0, store.writes);
-        assertNull(service.current());
-    }
-
-    private Map<String, String> fieldsWithoutPolicy() {
-        var fields = fields();
-        fields.remove("policy");
-        return fields;
-    }
-
-    @Test void multiplePoliciesOverloadSavesEveryPolicyInOrder() {
-        List<Settings> saved = new ArrayList<>();
-        var policies = List.of(Fixtures.read("food-policy"), Fixtures.read("drink-policy"));
-        SettingsForm.save("POST", "token", "token", policies, fieldsWithoutPolicy(), saved::add);
-        assertEquals(policies, saved.get(0).policies());
-    }
-
-    @Test void multiplePoliciesOverloadStillEnforcesCsrf() {
-        var policies = List.of(Fixtures.read("food-policy"));
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "wrong", policies, fieldsWithoutPolicy(), s -> fail("must not save")));
-    }
-
-    @Test void emptyMultiplePoliciesListCannotSave() {
-        assertThrows(IllegalArgumentException.class, () -> SettingsForm.save("POST", "token", "token", List.of(), fieldsWithoutPolicy(), s -> fail("must not save")));
+        PeerClearance pc = SettingsForm.parsePeerClearance(fields);
+        assertEquals("example.com", pc.domain());
+        assertEquals("1.3.6.1.4.1.5923.99.1", pc.policyId());
+        assertEquals(Fixtures.read("food-clearance-all-okay"), pc.clearance());
+        assertEquals(LabelFormat.XML, pc.format());
+        assertNotNull(pc.id());
     }
 }

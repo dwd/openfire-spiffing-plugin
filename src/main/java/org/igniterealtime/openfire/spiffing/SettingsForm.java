@@ -1,55 +1,70 @@
 package org.igniterealtime.openfire.spiffing;
 
+import io.cridland.spiffing.Site;
+import io.cridland.spiffing.Spif;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-import java.util.function.Consumer;
+import java.util.UUID;
 
-/** Validates the write request before invoking any configuration mutation. */
+/**
+ * Validates form submissions from the Admin Console settings page.
+ */
 public final class SettingsForm {
     private SettingsForm() {}
 
-    /** Single-policy convenience for existing call sites; the {@code "policy"} field supplies the one policy. */
-    public static void save(String method, String cookie, String token, Map<String, String> fields, Consumer<Settings> save) {
-        // Kept as an ArrayList (rather than List.of) so a missing/null "policy" field is reported as the
-        // usual "provide all documents" error below, instead of a NullPointerException from List.of.
-        List<String> policies = new ArrayList<>();
-        policies.add(fields.get("policy"));
-        save(method, cookie, token, policies, fields, save);
-    }
-
-    /**
-     * Validates and saves a candidate configuration with one or more policy documents, loaded together into
-     * one registry (see {@link Settings#policies()}); the first is the primary policy that the clearance,
-     * peer clearance, and default label are validated against.
-     */
-    public static void save(String method, String cookie, String token, List<String> policies, Map<String, String> fields, Consumer<Settings> save) {
+    public static void validateCsrf(String method, String cookie, String token) {
         if (!"POST".equals(method) || cookie == null || token == null || token.isEmpty()
             || !MessageDigest.isEqual(cookie.getBytes(StandardCharsets.UTF_8), token.getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("The form expired. Please try again.");
         }
-        Settings settings;
-        try {
-            // Missing field (e.g. a form saved before this switch existed) defaults to the safe "warn" mode.
-            String enforcement = fields.get("enforcementMode");
-            EnforcementMode enforcementMode = enforcement == null ? EnforcementMode.WARN : EnforcementMode.valueOf(enforcement);
-            // A checkbox is absent from the submission entirely when unchecked, so a missing field means "off".
-            boolean stripDefaultLabelForFederation = Boolean.parseBoolean(fields.get("stripDefaultLabelForFederation"));
-            // The peer clearance is optional; a missing/empty field means none is configured, and a missing
-            // format field (e.g. a form saved before this feature existed) defaults harmlessly to ESS.
-            String peerClearance = fields.get("peerClearance");
-            if (peerClearance == null) peerClearance = "";
-            String peerClearanceFormatField = fields.get("peerClearanceFormat");
-            LabelFormat peerClearanceFormat = peerClearanceFormatField == null || peerClearanceFormatField.isEmpty()
-                ? LabelFormat.ESS : LabelFormat.valueOf(peerClearanceFormatField);
-            settings = new Settings(policies, fields.get("clearance"), LabelFormat.valueOf(fields.get("clearanceFormat")),
-                fields.get("label"), LabelFormat.valueOf(fields.get("labelFormat")), LabelFormat.valueOf(fields.get("outputFormat")),
-                enforcementMode, stripDefaultLabelForFederation, peerClearance, peerClearanceFormat);
-        } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Provide all documents and select valid formats.");
+    }
+
+    public static SecurityPolicy parsePolicy(Map<String, String> fields) {
+        String spif = fields.get("spif");
+        if (spif == null || spif.isBlank()) {
+            throw new IllegalArgumentException("SPIF document is required.");
         }
-        save.accept(settings);
+        Site site = new Site();
+        Spif s;
+        try {
+            s = site.load(spif);
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("The document is not a valid Open XML SPIF.", e);
+        }
+
+        String clearance = fields.get("clearance");
+        if (clearance != null && clearance.isBlank()) clearance = null;
+        String clearanceFormatStr = fields.get("clearanceFormat");
+        LabelFormat clearanceFormat = clearance != null && clearanceFormatStr != null && !clearanceFormatStr.isBlank()
+            ? LabelFormat.valueOf(clearanceFormatStr) : null;
+
+        String defaultLabel = fields.get("defaultLabel");
+        if (defaultLabel != null && defaultLabel.isBlank()) defaultLabel = null;
+        String defaultLabelFormatStr = fields.get("defaultLabelFormat");
+        LabelFormat defaultLabelFormat = defaultLabel != null && defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
+            ? LabelFormat.valueOf(defaultLabelFormatStr) : null;
+
+        boolean isDefault = Boolean.parseBoolean(fields.get("isDefault"));
+
+        return new SecurityPolicy(s.policyId(), s.name(), spif, clearance, clearanceFormat, defaultLabel, defaultLabelFormat, isDefault);
+    }
+
+    public static PeerClearance parsePeerClearance(Map<String, String> fields) {
+        String domain = fields.get("domain");
+        if (domain == null) domain = "";
+        String policyId = fields.get("policyId");
+        if (policyId == null || policyId.isBlank()) {
+            throw new IllegalArgumentException("Policy selection is required for peer clearance.");
+        }
+        String clearance = fields.get("clearance");
+        if (clearance == null || clearance.isBlank()) {
+            throw new IllegalArgumentException("Clearance document is required.");
+        }
+        String formatStr = fields.get("format");
+        LabelFormat format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.ESS;
+        String id = UUID.randomUUID().toString();
+        return new PeerClearance(id, domain.trim(), policyId.trim(), clearance, format);
     }
 }

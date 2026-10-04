@@ -27,7 +27,7 @@ class CatalogServiceTest {
     }
 
     @Test void addValidatesAgainstTheActivePolicyAndClearance() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var service = new CatalogService(new Store(), () -> configuration);
         assertThrows(IllegalArgumentException.class,
             () -> service.add("Bacon", null, LabelFormat.XML, Fixtures.read("food-label-bacon"), false));
@@ -37,7 +37,7 @@ class CatalogServiceTest {
     }
 
     @Test void onlyOneEntryCanBeTheDefault() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var store = new Store();
         var service = new CatalogService(store, () -> configuration);
         var first = service.add("First", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
@@ -51,7 +51,7 @@ class CatalogServiceTest {
     }
 
     @Test void removeDeletesTheEntry() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var service = new CatalogService(new Store(), () -> configuration);
         var entry = service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
         service.remove(entry.id());
@@ -64,7 +64,7 @@ class CatalogServiceTest {
     }
 
     @Test void buildCatalogEncodesEachEntryWithSelectorAndDefaultAttributes() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var service = new CatalogService(new Store(), () -> configuration);
         service.add("Milk chocolate", "Food|Chocolate", LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
         var catalog = service.buildCatalog(false);
@@ -78,8 +78,7 @@ class CatalogServiceTest {
     }
 
     @Test void entriesThatNoLongerValidateAreOmittedFromTheCatalog() {
-        var settings = Fixtures.settings();
-        var configuration = new PolicyConfiguration(settings);
+        var configuration = Fixtures.configuration();
         var store = new Store();
         var service = new CatalogService(store, () -> configuration);
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
@@ -90,7 +89,7 @@ class CatalogServiceTest {
     }
 
     @Test void buildCatalogOmitsAnEntryDeniedByThePeerClearanceWhenRequested() {
-        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var configuration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var service = new CatalogService(new Store(), () -> configuration);
         // Permitted by the server clearance (food-clearance-all-okay), but the peer clearance denies milk chocolate.
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);

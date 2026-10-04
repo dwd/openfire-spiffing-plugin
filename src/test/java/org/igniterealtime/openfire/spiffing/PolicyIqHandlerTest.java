@@ -20,7 +20,7 @@ class PolicyIqHandlerTest {
     }
 
     @Test void listsEveryLoadedPolicyByIdAndName() {
-        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var configuration = Fixtures.configurationWithSecondPolicy();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", null, null));
         assertEquals(IQ.Type.result, response.getType());
@@ -33,7 +33,7 @@ class PolicyIqHandlerTest {
     }
 
     @Test void returnsTheRequestedPolicyDocumentById() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", "1.2.826.0.1.6726289.0.0", null));
         assertEquals(IQ.Type.result, response.getType());
@@ -44,7 +44,7 @@ class PolicyIqHandlerTest {
     }
 
     @Test void returnsTheRequestedPolicyDocumentByName() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", null, "Food"));
         assertEquals(IQ.Type.result, response.getType());
@@ -52,7 +52,7 @@ class PolicyIqHandlerTest {
     }
 
     @Test void anIdAttributeTakesPriorityOverANameAttribute() {
-        var configuration = new PolicyConfiguration(Fixtures.settingsWithSecondPolicy());
+        var configuration = Fixtures.configurationWithSecondPolicy();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         // A mismatched name is ignored, since the id attribute is present and matches.
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", "1.2.826.0.1.6726289.0.1", "Food"));
@@ -61,21 +61,21 @@ class PolicyIqHandlerTest {
     }
 
     @Test void anUnknownIdOrNameIsRejectedAsItemNotFound() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", "not-a-policy", null));
         assertEquals(PacketError.Condition.item_not_found, response.getError().getCondition());
     }
 
     @Test void rejectsNonGetRequests() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var handler = new PolicyIqHandler(() -> configuration, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.set, "user@example.com", null, null));
         assertEquals(PacketError.Condition.bad_request, response.getError().getCondition());
     }
 
     @Test void rejectsNonLocalRequesters() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var handler = new PolicyIqHandler(() -> configuration, jid -> false);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@remote.example", null, null));
         assertEquals(PacketError.Condition.not_authorized, response.getError().getCondition());

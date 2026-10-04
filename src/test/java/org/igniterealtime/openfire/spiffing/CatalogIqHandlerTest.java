@@ -25,7 +25,7 @@ class CatalogIqHandlerTest {
     private static final java.util.function.Predicate<JID> IS_LOCAL_DOMAIN = jid -> "example.com".equals(jid.getDomain());
 
     @Test void returnsCatalogForALocalGetRequest() {
-        var configuration = new PolicyConfiguration(Fixtures.settings());
+        var configuration = Fixtures.configuration();
         var service = new CatalogService(new CatalogServiceTest.Store(), () -> configuration);
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
         var handler = new CatalogIqHandler(service, jid -> true);
@@ -36,14 +36,14 @@ class CatalogIqHandlerTest {
     }
 
     @Test void rejectsNonGetRequests() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var handler = new CatalogIqHandler(service, jid -> true);
         IQ response = handler.handleIQ(request(IQ.Type.set, "user@example.com"));
         assertEquals(PacketError.Condition.bad_request, response.getError().getCondition());
     }
 
     @Test void rejectsNonLocalRequesters() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var handler = new CatalogIqHandler(service, jid -> false);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@remote.example"));
         assertEquals(PacketError.Condition.not_authorized, response.getError().getCondition());
@@ -58,7 +58,7 @@ class CatalogIqHandlerTest {
 
     @Test void aLocalToAttributeDoesNotRequireThePeerClearance() {
         // Denied by the peer clearance, but permitted by the server clearance.
-        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var configuration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var service = new CatalogService(new CatalogServiceTest.Store(), () -> configuration);
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
         var handler = new CatalogIqHandler(service, IS_LOCAL_DOMAIN);
@@ -69,7 +69,7 @@ class CatalogIqHandlerTest {
 
     @Test void aFederatedToAttributeAlsoRequiresThePeerClearance() {
         // Denied by the peer clearance, but permitted by the server clearance.
-        var configuration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var configuration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var service = new CatalogService(new CatalogServiceTest.Store(), () -> configuration);
         service.add("Milk chocolate", null, LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
         var handler = new CatalogIqHandler(service, IS_LOCAL_DOMAIN);
@@ -79,7 +79,7 @@ class CatalogIqHandlerTest {
     }
 
     @Test void aMalformedToAttributeIsRejectedAsABadRequest() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var handler = new CatalogIqHandler(service, IS_LOCAL_DOMAIN);
         IQ response = handler.handleIQ(request(IQ.Type.get, "user@example.com", "not a valid jid"));
         assertEquals(PacketError.Condition.bad_request, response.getError().getCondition());

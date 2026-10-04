@@ -19,7 +19,7 @@ class CatalogFormTest {
     }
 
     @Test void rejectsWrongMethodOrMismatchedCsrf() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.add("GET", "token", "token", validFields(), service));
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.add("POST", "token", "other", validFields(), service));
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.add("POST", null, "token", validFields(), service));
@@ -27,7 +27,7 @@ class CatalogFormTest {
     }
 
     @Test void addsAValidEntryAndDefaultsBlankSelectorToNull() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var fields = validFields();
         fields.put("selector", " ");
         CatalogForm.add("POST", "token", "token", fields, service);
@@ -37,7 +37,7 @@ class CatalogFormTest {
     }
 
     @Test void invalidFormatOrMissingFieldsFailValidation() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var fields = validFields();
         fields.put("format", "NOT_A_FORMAT");
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.add("POST", "token", "token", fields, service));
@@ -45,7 +45,7 @@ class CatalogFormTest {
     }
 
     @Test void rejectsALabelDeniedByThePolicy() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var fields = validFields();
         fields.put("label", Fixtures.read("food-label-bacon"));
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.add("POST", "token", "token", fields, service));
@@ -53,7 +53,7 @@ class CatalogFormTest {
     }
 
     @Test void removeRequiresCsrfAndAnId() {
-        var service = new CatalogService(new CatalogServiceTest.Store(), () -> new PolicyConfiguration(Fixtures.settings()));
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         CatalogForm.add("POST", "token", "token", validFields(), service);
         var id = service.entries().get(0).id();
         assertThrows(IllegalArgumentException.class, () -> CatalogForm.remove("POST", "token", "other", id, service));

@@ -3,10 +3,10 @@
 An Openfire plugin for server clearance enforcement using [XEP-0258](https://xmpp.org/extensions/xep-0258.html)
 and [Spiffing Java](https://github.com/dwd/spiffing-java).
 
-Configure a policy, server clearance, and default message label in **Server → Server
-Settings → Spiffing security labels**. Saving checks both policy validity and
-clearance authorization of the default. Inbound messages are checked before
-routing; unlabelled messages are stamped with that default.
+Configure policies, server clearances, and default message labels in **Server → Server
+Settings → Spiffing security labels**. Saving validates policy documents and
+ensures default labels are authorized by their policy clearances. Inbound messages
+are checked before routing; unlabelled messages are stamped with the active default label.
 
 Administrators can also curate a named label catalogue in **Server → Server
 Settings → Spiffing label catalogue**, answering XEP-0258 catalogue discovery
@@ -33,16 +33,13 @@ checkout is required after installing the dependency.
 Install `target/spiffing-openfire-plugin-assembly.jar` using Openfire's plugin
 upload page. The archive contains the plugin and Spiffing. Bouncy Castle is supplied by Openfire.
 **The plugin is inactive, and can be installed safely without disrupting existing
-traffic, until an administrator saves a policy, server clearance, and default
-label.** No sample policy or clearance is activated automatically; the settings
-page notes this inactive state. On first install, Openfire creates the
-`ofSpiffingCatalog` database table from `src/main/database/spiffing_*.sql` for
-the label catalogue.
+traffic, until an administrator adds a security policy.** On first install,
+Openfire creates the `ofSpiffingCatalog`, `ofSpiffingPolicy`, and `ofSpiffingClearance`
+database tables from `src/main/database/spiffing_*.sql`.
 
 ## Configuration
 
-Paste an Open XML SPIF policy and the clearance/default label payloads. Select
-input formats independently:
+Upload Open XML SPIF policies, and configure optional clearances and default message labels:
 
 | Selection | Label | Clearance |
 | --- | --- | --- |
@@ -55,17 +52,12 @@ format used when stamping defaults; ESS is the initial selection. The plugin
 generates the XEP-0258 envelope and policy-derived display marking. Existing
 permitted labels retain their original encoding and marking.
 
-Configuration is stored as individual Openfire properties under the
-`plugin.spiffing.settings.*` namespace (the `ofProperty` database table for a
-database-backed installation, or the standalone XML properties file otherwise),
-the usual idiom for Openfire and its plugins. Save changes through the Admin
-Console. Invalid saves preserve the previous configuration. Settings that were
-never saved leave the plugin inactive (ordinary messages pass through
-unaffected); corrupted stored settings (something was saved but no longer
-loads or validates) still block ordinary messages at startup, distinct from
-never having been configured at all. Back up the Openfire database (or
-standalone properties file) to preserve this configuration. Configuration is
-per node; automatic cluster distribution is not implemented.
+Policies, server clearances, default labels, and peer clearances are persisted in the
+database (`ofSpiffingPolicy` and `ofSpiffingClearance` tables). Operational preferences
+(enforcement mode, default output format, federation default stripping) are managed
+via Openfire `SystemProperty` settings. Partial configuration is supported: if a policy
+is loaded without a clearance or without a default label, the Admin Console prompts the
+administrator with advisory notices while validating inbound labels under loaded SPIF rules.
 
 ## Enforcement scope
 
@@ -77,9 +69,9 @@ per node; automatic cluster distribution is not implemented.
   clearance membership and policy category rules.
 - Unknown policies, unsupported formats, invalid labels, denied labels, duplicate
   envelopes, and unverified cross-policy equivalents are rejected with a sanitized
-  `forbidden` error. Corrupted stored configuration uses `service-unavailable`; a
-  plugin that was never configured at all is simply inactive and does not
-  reject anything.
+  `forbidden` error (or logged and passed through when in `WARN` mode). Corrupted stored
+  configuration uses `service-unavailable`; an unconfigured plugin is simply inactive
+  and does not reject anything.
 - Error messages bypass authorization and stamping, as XEP-0258 requires. Error
   messages containing a direct XEP-0258 label are discarded without a reply.
 - Only the outer message's direct label authorizes that message. Forwarded inner
@@ -92,7 +84,7 @@ per node; automatic cluster distribution is not implemented.
   removed in the Admin Console and stored in the Openfire database.
 - `<catalog/>` IQ requests (`urn:xmpp:sec-label:catalog:2`) are answered only for
   local clients; remote/federated requests are rejected with `not-authorized`.
-- Each entry is validated against the active policy and clearance both when
+- Each entry is validated against active policies and clearances both when
   added and again whenever the catalogue is requested; an entry that no longer
   validates after a policy/clearance change is silently omitted rather than
   failing the whole catalogue.

@@ -696,6 +696,35 @@ plugin assembly jar was built, all resolved against the locally cached
 compatibility variant (matching the now-superseded 5.0.0 release line) was not
 re-run in this session.
 
+## Database-backed policies and partial configuration
+
+The configuration persistence model was reworked from individual `JiveGlobals`
+property strings into dedicated database tables and selective `SystemProperty`
+definitions:
+
+- **Database tables (`ofSpiffingPolicy` and `ofSpiffingClearance`)**:
+  - `ofSpiffingPolicy` stores security policies (`policyID`, `policyName`, `spif`,
+    nullable `clearance`, nullable `clearanceFormat`, nullable `defaultLabel`,
+    nullable `defaultLabelFormat`, `isDefault`).
+  - `ofSpiffingClearance` stores peer clearances (`clearanceID`, `domain`,
+    `policyID`, `clearance`, `format`), where `domain = ""` indicates the default
+    peer clearance.
+  - Allows individual SPIFs to be added, updated, or deleted independently.
+- **Selective `SystemProperty` usage**:
+  - Global operational preferences (`plugin.spiffing.enforcementMode`,
+    `plugin.spiffing.outputFormat`, `plugin.spiffing.stripDefaultLabelForFederation`)
+    use `SystemProperty`.
+- **Partial configuration**:
+  - Policies can be configured with or without clearances and default labels.
+  - The Admin Console displays advisory warning prompts when clearances or default
+    labels are unconfigured rather than failing closed on partial setups.
+  - Inbound and outbound message labels are validated against loaded SPIFs; when a
+    clearance is present on another policy, Spiffing translates labels across
+    equivalent policies to evaluate authorization.
+- **Test verification**:
+  - The full suite was verified with `mvn verify`: **157 tests passed**, with no
+    failures or skips, JSP compilation passed, and the plugin assembly JAR was built.
+
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
 The catalogue is a separate, administrator-curated list of named security labels
