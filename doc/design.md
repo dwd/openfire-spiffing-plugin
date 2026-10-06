@@ -715,6 +715,9 @@ definitions:
   - Global operational preferences (`plugin.spiffing.enforcementMode`,
     `plugin.spiffing.outputFormat`, `plugin.spiffing.stripDefaultLabelForFederation`)
     use `SystemProperty`.
+  - Properties check for existing registrations with `SystemProperty.getProperty(...).orElseGet(...)`
+    during class initialization (`SpiffingProperties.<clinit>`), preventing `IllegalArgumentException`
+    and `ExceptionInInitializerError` across dynamic plugin and JSP reloads.
 - **Partial configuration**:
   - Policies can be configured with or without clearances and default labels.
   - The Admin Console displays advisory warning prompts when clearances or default

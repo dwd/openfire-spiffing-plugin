@@ -10,26 +10,32 @@ public final class SpiffingProperties {
     private static volatile Boolean stripDefaultOverride;
     private static volatile String outputFormatOverride;
 
+    @SuppressWarnings("unchecked")
     public static final SystemProperty<String> ENFORCEMENT_MODE =
-        SystemProperty.Builder.ofType(String.class)
-            .setKey("plugin.spiffing.enforcementMode")
-            .setDefaultValue("WARN")
-            .setDynamic(true)
-            .build();
+        (SystemProperty<String>) SystemProperty.getProperty("plugin.spiffing.enforcementMode")
+            .orElseGet(() -> SystemProperty.Builder.ofType(String.class)
+                .setKey("plugin.spiffing.enforcementMode")
+                .setDefaultValue("WARN")
+                .setDynamic(true)
+                .build());
 
+    @SuppressWarnings("unchecked")
     public static final SystemProperty<Boolean> STRIP_DEFAULT_LABEL_FOR_FEDERATION =
-        SystemProperty.Builder.ofType(Boolean.class)
-            .setKey("plugin.spiffing.stripDefaultLabelForFederation")
-            .setDefaultValue(false)
-            .setDynamic(true)
-            .build();
+        (SystemProperty<Boolean>) SystemProperty.getProperty("plugin.spiffing.stripDefaultLabelForFederation")
+            .orElseGet(() -> SystemProperty.Builder.ofType(Boolean.class)
+                .setKey("plugin.spiffing.stripDefaultLabelForFederation")
+                .setDefaultValue(false)
+                .setDynamic(true)
+                .build());
 
+    @SuppressWarnings("unchecked")
     public static final SystemProperty<String> OUTPUT_FORMAT =
-        SystemProperty.Builder.ofType(String.class)
-            .setKey("plugin.spiffing.outputFormat")
-            .setDefaultValue("ESS")
-            .setDynamic(true)
-            .build();
+        (SystemProperty<String>) SystemProperty.getProperty("plugin.spiffing.outputFormat")
+            .orElseGet(() -> SystemProperty.Builder.ofType(String.class)
+                .setKey("plugin.spiffing.outputFormat")
+                .setDefaultValue("ESS")
+                .setDynamic(true)
+                .build());
 
     public static EnforcementMode getEnforcementMode() {
         if (enforcementModeOverride != null) {
