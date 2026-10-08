@@ -60,7 +60,7 @@ public final class CatalogForm {
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (RuntimeException e) {
-            throw new IllegalArgumentException("Provide a name, a valid format, and a label that passes the policy and clearance.");
+            throw new IllegalArgumentException("Provide a valid format, and a label that passes the policy and clearance.");
         }
     }
 

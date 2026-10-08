@@ -36,6 +36,20 @@ class CatalogFormTest {
         assertTrue(service.entries().get(0).isDefault());
     }
 
+    @Test void addsValidEntryWithOmittedOrBlankNameInRawMode() {
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
+        var fields = validFields();
+        fields.remove("name");
+        CatalogForm.add("POST", "token", "token", fields, service);
+        assertEquals(1, service.entries().size());
+        assertEquals("[ Food Sweet/Yummy Chocolate Brown Contains Lactose Not Vegan Animal Rights ]", service.entries().get(0).name());
+
+        fields.put("name", "   ");
+        CatalogForm.add("POST", "token", "token", fields, service);
+        assertEquals(2, service.entries().size());
+        assertEquals("[ Food Sweet/Yummy Chocolate Brown Contains Lactose Not Vegan Animal Rights ]", service.entries().get(1).name());
+    }
+
     @Test void invalidFormatOrMissingFieldsFailValidation() {
         var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
         var fields = validFields();
@@ -89,6 +103,29 @@ class CatalogFormTest {
         assertEquals(LabelFormat.XML, entry.format());
         assertFalse(entry.isDefault());
         assertTrue(entry.payload().contains("52"));
+    }
+
+    @Test void addsValidEntryWithOmittedOrBlankNameInBuilderMode() {
+        var service = new CatalogService(new CatalogServiceTest.Store(), Fixtures::configuration);
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("selector", "Food|Sweet");
+        fields.put("format", "XML");
+        fields.put("mode", "builder");
+        fields.put("classification", "52");
+        fields.put("isDefault", "false");
+
+        CatalogForm.add("POST", "token", "token", fields,
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3"),
+            spif,
+            service
+        );
+
+        assertEquals(1, service.entries().size());
+        CatalogEntry entry = service.entries().get(0);
+        assertEquals("[ Food Luxury Sweet ]", entry.name());
     }
 
     @Test void builderModeRejectsMissingClassificationOrNullSpif() {

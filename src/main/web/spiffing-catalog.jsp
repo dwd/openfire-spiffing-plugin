@@ -125,8 +125,8 @@
     <form action="spiffing-catalog.jsp" method="post">
         <input type="hidden" name="csrf" value="<c:out value='${csrf}'/>"/>
         <input type="hidden" name="action" value="add"/>
-        <p><label for="name">Name</label></p>
-        <input type="text" id="name" name="name" size="60" maxlength="256" required/>
+        <p><label for="name">Name (optional)</label></p>
+        <input type="text" id="name" name="name" size="60" maxlength="256"/>
         <p><label for="selector">Selector (optional, e.g. <code>Classified|SECRET</code>)</label></p>
         <input type="text" id="selector" name="selector" size="60" maxlength="256"/>
 

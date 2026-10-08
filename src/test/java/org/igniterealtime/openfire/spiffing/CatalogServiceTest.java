@@ -36,6 +36,15 @@ class CatalogServiceTest {
         assertEquals(List.of(entry), service.entries());
     }
 
+    @Test void addWithOmittedOrBlankNameUsesCalculatedDisplayMarking() {
+        var configuration = Fixtures.configuration();
+        var service = new CatalogService(new Store(), () -> configuration);
+        var entryNull = service.add(null, "Food|Chocolate", LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
+        assertEquals("[ Food Sweet/Yummy Chocolate Brown Contains Lactose Not Vegan Animal Rights ]", entryNull.name());
+        var entryBlank = service.add("   ", "Food|Chocolate", LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), false);
+        assertEquals("[ Food Sweet/Yummy Chocolate Brown Contains Lactose Not Vegan Animal Rights ]", entryBlank.name());
+    }
+
     @Test void onlyOneEntryCanBeTheDefault() {
         var configuration = Fixtures.configuration();
         var store = new Store();

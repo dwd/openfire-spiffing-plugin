@@ -35,6 +35,9 @@ plugin's `provided`/parent dependency was moved from Openfire 5.0.0 to
 Bouncy Castle version to 1.84, on September 25, 2026 (see "Build and
 dependency compatibility" below). Direct file upload for SPIF policies was
 added to the Admin Console on October 4, 2026 (see "SPIF file upload" below).
+Catalogue entry names were made optional in the catalogue editor on October 8,
+2026, defaulting to the display marking calculated from the label (see
+"Label catalogue" below).
 
 ## Objective and confirmed requirements
 
@@ -766,12 +769,15 @@ with the user before implementation:
   still publishes a single, server-wide catalogue (no per-recipient catalogue
   content is added beyond this ACDF filtering) and does not change the
   locality check above.
-- **Entry content**: each entry has a name, an optional XEP-0258 `selector`
+- **Entry content**: each entry has a name (which may be omitted in the Admin
+  Console catalogue editor, in which case it defaults to the display marking
+  calculated from the label's policy evaluation), an optional XEP-0258 `selector`
   (validated as a `|`-separated non-empty path), a `LabelFormat` (ESS, NATO XML,
   or Spiffy XML, reusing the existing enum), and its own label payload. The
   payload is independently validated against the currently active policy and
   clearance via `PolicyConfiguration.encodeCatalogLabel`, exactly like the
-  default label, rather than only referencing already-known labels.
+  default label, rather than only referencing already-known labels. If the name
+  is omitted and the label produces no display marking, entry creation is rejected.
 - **Default flag**: exactly one entry may be flagged as the catalogue's
   `<item default="true"/>` (`CatalogEntry.isDefault`). Adding a new default
   entry clears the flag on any previous default (`CatalogStore.clearDefault`)
