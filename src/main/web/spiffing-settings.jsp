@@ -40,6 +40,7 @@
                 fields.put("clearanceMode", request.getParameter("clearanceMode"));
                 fields.put("clearance", request.getParameter("clearance"));
                 fields.put("clearanceFormat", request.getParameter("clearanceFormat"));
+                fields.put("defaultLabelMode", request.getParameter("defaultLabelMode"));
                 fields.put("defaultLabel", request.getParameter("defaultLabel"));
                 fields.put("defaultLabelFormat", request.getParameter("defaultLabelFormat"));
                 fields.put("isDefault", Boolean.toString(request.getParameter("isDefault") != null));
@@ -842,7 +843,7 @@
         function handleFile(file) {
             if (!file) return;
             if (file.size > 65536) {
-                alert("The selected clearance file exceeds the 64 KiB limit.");
+                alert("The selected file exceeds the 64 KiB limit.");
                 fileInput.value = "";
                 return;
             }
@@ -862,7 +863,7 @@
                     }
                 };
                 reader.onerror = function() {
-                    alert("Failed to read the binary clearance file.");
+                    alert("Failed to read the binary file.");
                 };
                 reader.readAsArrayBuffer(file);
             } else {
@@ -872,7 +873,7 @@
                     textarea.value = content;
                     if (formatSelect) {
                         var trimmed = content.trim();
-                        if (trimmed.startsWith("<") && (trimmed.includes("ConfidentialityClearance") || trimmed.includes("confidentialityclearance"))) {
+                        if (trimmed.startsWith("<") && (trimmed.includes("ConfidentialityClearance") || trimmed.includes("confidentialityclearance") || trimmed.includes("ConfidentialityInformation") || trimmed.includes("confidentialityinformation") || trimmed.includes("ConfidentialityLabel") || trimmed.includes("confidentialitylabel"))) {
                             formatSelect.value = "NATO";
                         } else if (trimmed.startsWith("<")) {
                             formatSelect.value = "XML";
@@ -882,7 +883,7 @@
                     }
                 };
                 reader.onerror = function() {
-                    alert("Failed to read the clearance file.");
+                    alert("Failed to read the file.");
                 };
                 reader.readAsText(file, "UTF-8");
             }

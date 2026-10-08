@@ -350,4 +350,24 @@ class SettingsFormTest {
         assertNull(policy.defaultLabel());
         assertNull(policy.defaultLabelFormat());
     }
+
+    @Test void parsesPolicyInLabelRawMode() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("spif", Fixtures.read("food-policy"));
+        fields.put("defaultLabelMode", "raw");
+        fields.put("defaultLabel", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("defaultLabelFormat", "XML");
+
+        SecurityPolicy policy = SettingsForm.parsePolicy(
+            fields,
+            java.util.List.of(),
+            java.util.List.of(),
+            "52",
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3")
+        );
+
+        assertEquals("1.2.826.0.1.6726289.0.0", policy.id());
+        assertEquals(Fixtures.read("food-label-milk-chocolate"), policy.defaultLabel());
+        assertEquals(LabelFormat.XML, policy.defaultLabelFormat());
+    }
 }
