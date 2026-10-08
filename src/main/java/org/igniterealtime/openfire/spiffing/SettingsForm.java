@@ -8,6 +8,7 @@ import io.cridland.spiffing.Site;
 import io.cridland.spiffing.Spif;
 import io.cridland.spiffing.Tag;
 import io.cridland.spiffing.TagSet;
+import io.cridland.spiffing.TagType;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -37,24 +38,17 @@ public final class SettingsForm {
         String policyId,
         String policyName,
         List<PolicyClassificationInfo> classifications,
-        List<PolicyTagSetInfo> tagSets,
+        List<PolicyTagSetInfo> clearanceTagSets,
         Set<String> activeClassificationLacvs,
         Set<String> activeCategorySpecs,
         String displayMarking,
+        List<PolicyTagSetInfo> labelTagSets,
         String activeLabelClassificationLacv,
         Set<String> activeLabelCategorySpecs,
         String defaultLabelDisplayMarking
     ) {
-        public PolicyClearanceMetadata(
-            String policyId,
-            String policyName,
-            List<PolicyClassificationInfo> classifications,
-            List<PolicyTagSetInfo> tagSets,
-            Set<String> activeClassificationLacvs,
-            Set<String> activeCategorySpecs,
-            String displayMarking
-        ) {
-            this(policyId, policyName, classifications, tagSets, activeClassificationLacvs, activeCategorySpecs, displayMarking, null, Set.of(), null);
+        public List<PolicyTagSetInfo> tagSets() {
+            return clearanceTagSets;
         }
     }
 
@@ -213,6 +207,9 @@ public final class SettingsForm {
             for (String spec : categorySpecs) {
                 if (spec == null || spec.isBlank()) continue;
                 Category cat = resolveCategory(spif, spec.trim());
+                if (cat.tag().type() == TagType.informative) {
+                    throw new IllegalArgumentException("Informative categories cannot be used in a clearance: " + spec);
+                }
                 clearance.addCategory(cat);
             }
         }
@@ -336,24 +333,34 @@ public final class SettingsForm {
             ));
         }
 
-        List<PolicyTagSetInfo> tagSetList = new ArrayList<>();
+        List<PolicyTagSetInfo> clearanceTagSetList = new ArrayList<>();
+        List<PolicyTagSetInfo> labelTagSetList = new ArrayList<>();
         for (TagSet ts : spif.tagSets()) {
-            List<PolicyCategoryInfo> catList = new ArrayList<>();
+            List<PolicyCategoryInfo> clearanceCatList = new ArrayList<>();
+            List<PolicyCategoryInfo> labelCatList = new ArrayList<>();
             for (Tag tag : ts.tags()) {
+                boolean isInformative = tag.type() == TagType.informative;
                 for (Category cat : tag.categories()) {
                     String spec = ts.id() + "|" + tag.type().name() + "|" + cat.lacv().toString();
-                    catList.add(new PolicyCategoryInfo(
+                    PolicyCategoryInfo catInfo = new PolicyCategoryInfo(
                         cat.name(),
                         cat.lacv().toString(),
                         tag.type().name(),
                         ts.id(),
                         tag.name(),
                         spec
-                    ));
+                    );
+                    labelCatList.add(catInfo);
+                    if (!isInformative) {
+                        clearanceCatList.add(catInfo);
+                    }
                 }
             }
-            if (!catList.isEmpty()) {
-                tagSetList.add(new PolicyTagSetInfo(ts.id(), ts.name(), List.copyOf(catList)));
+            if (!clearanceCatList.isEmpty()) {
+                clearanceTagSetList.add(new PolicyTagSetInfo(ts.id(), ts.name(), List.copyOf(clearanceCatList)));
+            }
+            if (!labelCatList.isEmpty()) {
+                labelTagSetList.add(new PolicyTagSetInfo(ts.id(), ts.name(), List.copyOf(labelCatList)));
             }
         }
 
@@ -401,10 +408,11 @@ public final class SettingsForm {
             spif.policyId(),
             spif.name(),
             List.copyOf(classList),
-            List.copyOf(tagSetList),
+            List.copyOf(clearanceTagSetList),
             Collections.unmodifiableSet(activeLacvs),
             Collections.unmodifiableSet(activeSpecs),
             displayMarking,
+            List.copyOf(labelTagSetList),
             activeLabelClassificationLacv,
             Collections.unmodifiableSet(activeLabelCategorySpecs),
             defaultLabelDisplayMarking

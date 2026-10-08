@@ -392,11 +392,11 @@
                     <div style="margin-bottom: 15px;">
                         <p><strong>Security Categories and Tag Sets</strong></p>
                         <c:choose>
-                            <c:when test="${empty editingMetadata.tagSets()}">
+                            <c:when test="${empty editingMetadata.clearanceTagSets()}">
                                 <p style="color: #888;"><em>No non-informative security categories defined in policy.</em></p>
                             </c:when>
                             <c:otherwise>
-                                <c:forEach var="ts" items="${editingMetadata.tagSets()}" varStatus="tsSt">
+                                <c:forEach var="ts" items="${editingMetadata.clearanceTagSets()}" varStatus="tsSt">
                                     <fieldset style="margin-top: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                         <legend style="font-weight: bold; padding: 0 6px;"><c:out value="${ts.name()}"/> (<code><c:out value="${ts.id()}"/></code>)</legend>
                                         <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
@@ -542,11 +542,11 @@
                     <div style="margin-bottom: 12px;">
                         <p><strong>Security Categories and Tag Sets</strong></p>
                         <c:choose>
-                            <c:when test="${empty editingMetadata.tagSets()}">
+                            <c:when test="${empty editingMetadata.labelTagSets()}">
                                 <p style="color: #888;"><em>No security categories defined in policy.</em></p>
                             </c:when>
                             <c:otherwise>
-                                <c:forEach var="ts" items="${editingMetadata.tagSets()}" varStatus="tsSt">
+                                <c:forEach var="ts" items="${editingMetadata.labelTagSets()}" varStatus="tsSt">
                                     <fieldset style="margin-top: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                         <legend style="font-weight: bold; padding: 0 6px;"><c:out value="${ts.name()}"/> (<code><c:out value="${ts.id()}"/></code>)</legend>
                                         <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
@@ -733,11 +733,11 @@
                             <div style="margin-bottom: 12px;">
                                 <p><strong><c:out value="${p.name()}"/> &mdash; Security Categories</strong></p>
                                 <c:choose>
-                                    <c:when test="${empty meta.tagSets()}">
-                                        <p style="color: #888;"><em>No security categories defined in policy.</em></p>
+                                    <c:when test="${empty meta.clearanceTagSets()}">
+                                        <p style="color: #888;"><em>No non-informative security categories defined in policy.</em></p>
                                     </c:when>
                                     <c:otherwise>
-                                        <c:forEach var="ts" items="${meta.tagSets()}" varStatus="tsSt">
+                                        <c:forEach var="ts" items="${meta.clearanceTagSets()}" varStatus="tsSt">
                                             <fieldset style="margin-top: 8px; margin-bottom: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                                 <legend style="font-weight: bold; padding: 0 6px;"><c:out value="${ts.name()}"/></legend>
                                                 <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
@@ -959,9 +959,9 @@
                     for (var t = 0; t < tagNodes.length; t++) {
                         var tagNode = tagNodes[t];
                         var tagType = tagNode.getAttribute("tagType") || tagNode.getAttribute("type") || "";
-                        if (tagType.toLowerCase() === "informative") continue;
+                        if (tagType.toLowerCase() === "informative" || tagType.toLowerCase() === "tagtype7") continue;
                         var tagName = tagNode.getAttribute("name") || tagType;
-                        var catNodes = tagNode.querySelectorAll("securityCategory");
+                        var catNodes = tagNode.querySelectorAll("tagCategory, securityCategory");
                         if (catNodes.length > 0) {
                             hasCategories = true;
                             html += "<fieldset style='margin-top:8px; margin-bottom:10px; padding:10px; border:1px solid #ddd; border-radius:4px;'><legend style='font-weight:bold; padding:0 6px;'>" + escapeHtml(tsName) + " &mdash; " + escapeHtml(tagName) + " (<em>" + escapeHtml(tagType) + "</em>)</legend><table class='jive-table' cellpadding='3' cellspacing='0' border='0' width='100%'><thead><tr><th width='5%'>Grant</th><th width='45%'>Category</th><th width='25%'>Tag / Type</th><th width='25%'>LACV</th></tr></thead><tbody>";
@@ -1049,7 +1049,7 @@
                         var tagNode = tagNodes[t];
                         var tagType = tagNode.getAttribute("tagType") || tagNode.getAttribute("type") || "";
                         var tagName = tagNode.getAttribute("name") || tagType;
-                        var catNodes = tagNode.querySelectorAll("securityCategory");
+                        var catNodes = tagNode.querySelectorAll("tagCategory, securityCategory");
                         if (catNodes.length > 0) {
                             hasCategories = true;
                             html += "<fieldset style='margin-top:8px; margin-bottom:10px; padding:10px; border:1px solid #ddd; border-radius:4px;'><legend style='font-weight:bold; padding:0 6px;'>" + escapeHtml(tsName) + " &mdash; " + escapeHtml(tagName) + " (<em>" + escapeHtml(tagType) + "</em>)</legend><table class='jive-table' cellpadding='3' cellspacing='0' border='0' width='100%'><thead><tr><th width='5%'>Include</th><th width='45%'>Category</th><th width='25%'>Tag / Type</th><th width='25%'>LACV</th></tr></thead><tbody>";

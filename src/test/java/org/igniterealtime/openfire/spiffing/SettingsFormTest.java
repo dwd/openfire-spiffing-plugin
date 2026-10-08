@@ -217,13 +217,51 @@ class SettingsFormTest {
         assertEquals("1.2.826.0.1.6726289.0.0", meta.policyId());
         assertEquals("Food", meta.policyName());
         assertFalse(meta.classifications().isEmpty());
-        assertFalse(meta.tagSets().isEmpty());
+        assertFalse(meta.clearanceTagSets().isEmpty());
+        assertFalse(meta.labelTagSets().isEmpty());
+
+        // Verify informative categories are excluded from clearanceTagSets but present in labelTagSets
+        boolean clearanceHasInformative = meta.clearanceTagSets().stream()
+            .flatMap(ts -> ts.categories().stream())
+            .anyMatch(cat -> "informative".equalsIgnoreCase(cat.tagType()));
+        assertFalse(clearanceHasInformative);
+
+        boolean labelHasInformative = meta.labelTagSets().stream()
+            .flatMap(ts -> ts.categories().stream())
+            .anyMatch(cat -> "informative".equalsIgnoreCase(cat.tagType()));
+        assertTrue(labelHasInformative);
+
+        // Clearance tagsets should exclude tagset 4 (Packaging) which contains only informative tags
+        assertFalse(meta.clearanceTagSets().stream().anyMatch(ts -> "1.2.826.0.1.6726289.0.0.4".equals(ts.id())));
+        assertTrue(meta.labelTagSets().stream().anyMatch(ts -> "1.2.826.0.1.6726289.0.0.4".equals(ts.id())));
+
         assertTrue(meta.activeClassificationLacvs().contains("52"));
         assertTrue(meta.activeClassificationLacvs().contains("51"));
         assertNotNull(meta.displayMarking());
         assertEquals("52", meta.activeLabelClassificationLacv());
         assertTrue(meta.activeLabelCategorySpecs().contains("1.2.826.0.1.6726289.0.0.1|permissive|3"));
         assertNotNull(meta.defaultLabelDisplayMarking());
+    }
+
+    @Test void buildClearanceRejectsInformativeCategories() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildClearance(
+                spif,
+                java.util.List.of("52"),
+                java.util.List.of("1.2.826.0.1.6726289.0.0.1|informative|78")
+            )
+        );
+
+        assertThrows(IllegalArgumentException.class, () ->
+            SettingsForm.buildClearance(
+                spif,
+                java.util.List.of("52"),
+                java.util.List.of("1.2.826.0.1.6726289.0.0.4|informative|0")
+            )
+        );
     }
 
     @Test void buildsLabelFromClassificationAndCategories() {

@@ -211,11 +211,11 @@
                                 <div style="margin-bottom: 12px;">
                                     <p><strong><c:out value="${p.name()}"/> &mdash; Security Categories and Tag Sets</strong></p>
                                     <c:choose>
-                                        <c:when test="${empty meta.tagSets()}">
+                                        <c:when test="${empty meta.labelTagSets()}">
                                             <p style="color: #888;"><em>No security categories defined in policy.</em></p>
                                         </c:when>
                                         <c:otherwise>
-                                            <c:forEach var="ts" items="${meta.tagSets()}" varStatus="tsSt">
+                                            <c:forEach var="ts" items="${meta.labelTagSets()}" varStatus="tsSt">
                                                 <fieldset style="margin-top: 8px; margin-bottom: 12px; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                                                     <legend style="font-weight: bold; padding: 0 6px;"><c:out value="${ts.name()}"/> (<code><c:out value="${ts.id()}"/></code>)</legend>
                                                     <table class="jive-table" cellpadding="3" cellspacing="0" border="0" width="100%">
