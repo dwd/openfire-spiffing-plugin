@@ -3,113 +3,59 @@
 This document answers two specific questions about the current implementation,
 cross-referenced against `doc/design.md`: which objects carry a label or a
 clearance, and at which points in a message's lifetime the plugin actually
-performs an access-control check. It does not introduce any new behavior; it
-only describes what `PolicyConfiguration` and `SecurityLabelInterceptor`
-already do, as of the "Fail-open when never configured" increment.
+performs an access-control check. It reflects the database-backed policies
+and partial configuration architecture.
 
 ## Objects that have a clearance
 
-There are up to **two** clearance objects in this plugin, and both belong to
-**this server's configuration**, not to any specific peer:
+Clearances are stored in the database (`ofSpiffingPolicy` and `ofSpiffingClearance` tables):
 
-- `Settings.clearance` (with `Settings.clearanceFormat`) is the single,
-  mandatory, administrator-configured payload representing this server's own
-  clearance, parsed once per configuration into a Spiffing `Clearance` and held
-  by `PolicyConfiguration`. This clearance is used, unchanged, as the
-  access-control decision input (`Spif.acdf(label, clearance)`) for **every**
-  label the plugin evaluates: inbound messages regardless of origin (local
-  client or federated peer), the administrator-configured default label, and
-  every label catalogue entry (`PolicyConfiguration.encodeCatalogLabel`). Since
-  multiple policies can be loaded (`doc/design.md`'s "Multiple policies"
-  section), the clearance always belongs to exactly one of them, the *primary*
-  policy (`Settings.policies().get(0)`); a label decoded under a different,
-  secondary loaded policy is translated to the primary policy
-  (`PolicyConfiguration.toPrimary`) before this same `acdf` call, so there is
-  still only ever one clearance object and one `acdf` decision per label.
-- `Settings.peerClearance` (with `Settings.peerClearanceFormat`) is an
-  **optional**, administrator-configured payload representing a single default
-  clearance for every federated peer (see `doc/design.md`'s "Peer clearance"
-  section). When left empty (the default), `PolicyConfiguration.peerClearance`
-  is `null` and every peer-clearance check point
-  (`hasPeerClearance`/`checkDefaultPeerClearance`/`check(envelope, true)`/
-  `checkPeerClearance(envelope)`) is a no-op; when configured, it is parsed and
-  validated against the loaded policy exactly like the server clearance, and
-  used as a *second*, independent `Spif.acdf(label, peerClearance)` decision
-  input for federated ingress/egress only (see below). Unlike the server
-  clearance, an invalid peer-clearance payload only blocks configuration when
-  non-empty; the default label is not itself pre-validated against it.
-- As already stated in `doc/design.md` ("The server clearance covers
-  local-client and federated traffic. No per-user or per-room clearance is
-  inferred from the server clearance."), there is still **no per-peer,
-  per-user, or per-room clearance** distinct from these two configured
-  objects. In particular, a remote/federated server is *not* modeled as an
-  object with its *own*, individually configured clearance; the plugin does
-  not read or derive a clearance from `session.getAddress()`, the remote
-  domain, or any other property of an `IncomingServerSession`/
-  `OutgoingServerSession`/`Session`. The (optional) peer clearance is one
-  single, default value applied uniformly to every peer, not a per-peer
-  lookup.
-- Nothing else — no data class for a room, a contact, a component, or a
-  specific domain — currently exists or is consulted as a clearance holder.
-  Answering the issue's framing directly: today **the server itself** always
-  has a clearance, and, when an administrator configures one, **every peer**
-  collectively shares a second, single default clearance; **no individual
-  peer server** has one of its own, and local clients are never checked
-  against the peer clearance.
+- **Server Clearances**: Each configured `SecurityPolicy` in `ofSpiffingPolicy`
+  may contain an optional (nullable) server clearance (`clearance`, `clearanceFormat`).
+  When present, each policy's clearance is loaded into a Spiffing `Clearance` object.
+  When an inbound/outbound label is evaluated:
+  - If a server clearance exists directly for that label's policy, `Spif.acdf(label, clearance)`
+    is evaluated directly.
+  - If no direct clearance exists for that policy, Spiffing translates (`label.encrypt(...)`)
+    the label to each policy for which a server clearance is available and evaluates
+    authorization against that clearance.
+  - In a partial configuration where no policy has a server clearance, policy validity
+    rules are enforced, but clearance authorization checks are bypassed (or warned).
+- **Peer Clearances**: Configured in the `ofSpiffingClearance` database table,
+  each peer clearance is associated with a domain (`""` representing the default peer
+  clearance for all federated peers) and a specific `policyID`. When inbound messages
+  arrive from a peer (`IncomingServerSession`) or egress to a federated peer
+  (`OutgoingServerSession`), the matching peer clearance (or default peer clearance)
+  is consulted, translating across loaded policies if needed.
 
 ## Objects that have a label
 
 Several distinct things carry a XEP-0258 label (a `<securitylabel/>` envelope
 or the underlying Spiffing `Label`), each with its own lifecycle:
 
-- **The configured default label**: `Settings.defaultLabel` (with
-  `Settings.labelFormat`), parsed once into `PolicyConfiguration.defaultLabel`
-  and validated (`assertValid` + `acdf`) at configuration time. It is
-  re-encoded once into `PolicyConfiguration.defaultEnvelope`, which is copied
-  (`defaultEnvelope()`) and attached to any inbound message that arrives
-  without a label, or whose primary `<label/>` is empty.
+- **The configured default label**: Each `SecurityPolicy` may have an optional
+  `defaultLabel` (and format). One policy is flagged as the default stamping policy (`isDefault`).
+  When configured, `PolicyConfiguration.defaultEnvelope` is attached to any inbound message
+  that arrives without a label, or whose primary `<label/>` is empty. If no default label
+  is configured across any policy, unlabelled messages pass through unstamped.
 - **Each inbound message**: `Message.getElement()` may already carry a
   `<securitylabel/>` envelope, supplied by whichever entity sent it (a local
-  client or, after server-to-server delivery, a remote domain). This is the
-  only label the plugin decodes from untrusted input, and it is the one
-  bounded and validated by `PolicyConfiguration.check`/`boundTree` before
-  being trusted.
+  client or a remote domain). This is decoded, bounded, and validated by
+  `PolicyConfiguration.check`/`boundTree`.
 - **Each outbound message to another server**: after inbound stamping, the
-  same envelope may still be present when the stanza is later handed to an
-  `OutgoingServerSession`. `SecurityLabelInterceptor`'s outbound path reads
-  this label twice: once to run a real peer-clearance ACDF decision
-  (`PolicyConfiguration.checkPeerClearance`, a no-op without a configured peer
-  clearance), and once more, afterward, to compare its `<displaymarking>` text
-  against the default's for stripping; see "Egress to a federated peer now
-  performs a real, but narrower, ACDF check" below.
+  same envelope may still be present when the stanza is handed to an
+  `OutgoingServerSession`. `SecurityLabelInterceptor` reads this label on egress
+  to run peer-clearance validation (`PolicyConfiguration.checkPeerClearance`) and to strip
+  default-stamped labels when `stripDefaultLabelForFederation` is enabled.
 - **Each label catalogue entry**: `CatalogEntry.payload` (with its own
-  `LabelFormat`), stored independently of the message-stamping default and
-  validated against the active policy/clearance only when added
-  (`CatalogService.add`, server clearance only) and when the catalogue is
-  (re)built for a `get` request (`CatalogService.buildCatalog`, server
-  clearance always, plus the peer clearance too when the request's `to=`
-  names a non-local recipient); an entry that no longer validates against
-  whichever checks apply to that request is omitted from the published
-  `<catalog/>`, not rejected outright.
+  `LabelFormat`), stored in `ofSpiffingCatalog` independently of the message-stamping
+  default and validated against the active policy/clearance when added
+  (`CatalogService.add`) and when the catalogue is discovered (`CatalogService.buildCatalog`).
 - **Equivalent labels**: `<equivalentlabel/>` children of an inbound envelope
-  are also individually decoded, validated, and access-checked
-  (`PolicyConfiguration.check`), though they never replace the primary label.
-  An equivalent label under the primary policy is compared to the primary
-  label directly; one under a secondary loaded policy is first translated to
-  the primary policy (`toPrimary`, using that policy's own declared
-  `equivalentPolicy`/`equivalentClassification`/`equivalentSecCategoryTag`
-  mappings) and only then compared. Either way, the label is only accepted if
-  it ends up with the same classification and category set as the primary
-  label under the primary policy; an unverified cross-policy equivalence claim
-  made by the message itself is never trusted.
+  are individually decoded, validated, and translated/verified for equivalence against
+  the primary label.
 
-There is no notion of a label belonging to a server, a peer, a room, or a
-user as a standing property — a label is always attached to one specific
-message (or catalogue entry) and evaluated per message. Contrast this with
-the clearances above, which are fixed, standing properties of the server's
-configuration (one mandatory, one optional).
-
-## Checks made over a message's entire lifetime
+## Points in a message's lifetime where checks occur
 
 Real ACDF checks (`Spif.assertValid` and/or `Spif.acdf`) happen at two points:
 always on the **inbound** path before the message is handed off for delivery,

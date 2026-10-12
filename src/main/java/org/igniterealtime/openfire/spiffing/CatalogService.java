@@ -39,12 +39,17 @@ public final class CatalogService {
         if (current == null) {
             throw new IllegalArgumentException("Save a valid policy and clearance before adding catalogue entries.");
         }
-        CatalogEntry entry = new CatalogEntry(UUID.randomUUID().toString(), name, selector, format, payload, isDefault);
+        Element encoded;
         try {
-            current.encodeCatalogLabel(entry.payload(), entry.format(), false);
+            encoded = current.encodeCatalogLabel(payload, format, false);
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("The label is invalid, exceeds the server clearance, or cannot be represented in the selected format.");
         }
+        String effectiveName = (name != null && !name.isBlank()) ? name : PolicyConfiguration.displayMarking(encoded);
+        if (effectiveName == null || effectiveName.isBlank()) {
+            throw new IllegalArgumentException("A name must be provided if the label does not produce a display marking.");
+        }
+        CatalogEntry entry = new CatalogEntry(UUID.randomUUID().toString(), effectiveName, selector, format, payload, isDefault);
         if (isDefault) store.clearDefault();
         store.add(entry);
         return entry;

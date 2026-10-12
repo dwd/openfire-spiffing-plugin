@@ -56,7 +56,7 @@ public final class SpiffingPlugin implements Plugin {
     public synchronized void initializePlugin(PluginManager manager, File directory) {
         if (interceptor != null) return;
         if (configuration == null) {
-            configuration = new ConfigurationService(new JiveGlobalsConfigurationStore());
+            configuration = new ConfigurationService(new DatabasePolicyStore());
         }
         if (catalog == null) {
             catalog = new CatalogService(new DatabaseCatalogStore(), configuration::current);
@@ -96,19 +96,14 @@ public final class SpiffingPlugin implements Plugin {
         }
     }
 
-    public Settings getSettings() {
+    public ConfigurationService configurationService() { return configuration; }
+
+    public boolean isConfigured() {
         PolicyConfiguration current = configuration.current();
-        return current == null ? null : current.settings();
+        return current != null && current.hasPolicies();
     }
 
-    public boolean isConfigured() { return configuration.current() != null; }
-
-    /** True only when persisted settings exist but failed to load/validate; the plugin blocks ordinary
-     * messages in that state. False both when a valid configuration is active and when the plugin was
-     * simply never configured, in which case it is inactive but does not block anything. */
     public boolean isCorrupted() { return configuration.isCorrupted(); }
-
-    public void save(Settings settings) { configuration.save(settings); }
 
     public CatalogService catalogService() { return catalog; }
 }

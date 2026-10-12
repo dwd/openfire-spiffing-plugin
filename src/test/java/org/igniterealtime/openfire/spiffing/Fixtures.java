@@ -13,33 +13,51 @@ final class Fixtures {
         } catch (Exception e) { throw new AssertionError(e); }
     }
 
-    static Settings settings() { return settings(LabelFormat.ESS); }
-
-    // Tests default to "enforce" so pre-existing rejection assertions keep testing rejection.
-    static Settings settings(LabelFormat output) { return settings(output, EnforcementMode.ENFORCE); }
-
-    static Settings settings(LabelFormat output, EnforcementMode enforcementMode) {
-        return settings(output, enforcementMode, false);
+    static SecurityPolicy foodPolicy() {
+        return foodPolicy(read("food-clearance-all-okay"), read("food-label-milk-chocolate"));
     }
 
-    static Settings settings(LabelFormat output, EnforcementMode enforcementMode, boolean stripDefaultLabelForFederation) {
-        return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
-            read("food-label-milk-chocolate"), LabelFormat.XML, output, enforcementMode, stripDefaultLabelForFederation);
+    static SecurityPolicy foodPolicy(String clearance, String defaultLabel) {
+        return new SecurityPolicy(
+            "1.2.826.0.1.6726289.0.0",
+            "Food",
+            read("food-policy"),
+            clearance,
+            clearance != null ? LabelFormat.XML : null,
+            defaultLabel,
+            defaultLabel != null ? LabelFormat.XML : null,
+            true
+        );
     }
 
-    /** A configuration with a configured peer clearance, built from an existing clearance fixture. */
-    static Settings settingsWithPeerClearance(String peerClearanceFixture, EnforcementMode enforcementMode) {
-        return new Settings(read("food-policy"), read("food-clearance-all-okay"), LabelFormat.XML,
-            read("food-label-milk-chocolate"), LabelFormat.XML, LabelFormat.ESS, enforcementMode, false,
-            read(peerClearanceFixture), LabelFormat.XML);
+    static SecurityPolicy drinkPolicy() {
+        return new SecurityPolicy(
+            "1.2.826.0.1.6726289.0.1",
+            "Drink",
+            read("drink-policy"),
+            null,
+            null,
+            null,
+            null,
+            false
+        );
     }
 
-    /** A configuration loading two policies: the primary "food" policy (used for the clearance and default
-     * label, unchanged from {@link #settings()}), plus a second "drink" policy that declares an equivalence
-     * back to it, for testing cross-policy label translation. */
-    static Settings settingsWithSecondPolicy() {
-        return new Settings(List.of(read("food-policy"), read("drink-policy")), read("food-clearance-all-okay"), LabelFormat.XML,
-            read("food-label-milk-chocolate"), LabelFormat.XML, LabelFormat.ESS, EnforcementMode.ENFORCE, false);
+    static PolicyConfiguration configuration() {
+        return configuration(LabelFormat.ESS);
+    }
+
+    static PolicyConfiguration configuration(LabelFormat output) {
+        return new PolicyConfiguration(List.of(foodPolicy()), List.of(), output);
+    }
+
+    static PolicyConfiguration configurationWithPeerClearance(String peerClearanceFixture) {
+        PeerClearance pc = new PeerClearance("pc1", "", "1.2.826.0.1.6726289.0.0", read(peerClearanceFixture), LabelFormat.XML);
+        return new PolicyConfiguration(List.of(foodPolicy()), List.of(pc), LabelFormat.ESS);
+    }
+
+    static PolicyConfiguration configurationWithSecondPolicy() {
+        return new PolicyConfiguration(List.of(foodPolicy(), drinkPolicy()), List.of(), LabelFormat.ESS);
     }
 
     static Element envelope(String fixture, LabelFormat format) {

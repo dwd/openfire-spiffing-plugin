@@ -34,7 +34,7 @@ class SpiffingPluginTest {
 
     @Test void registersOnceUnregistersAndRestoresPersistedSettings() throws Exception {
         var runtime = new Runtime();
-        var store = new ConfigurationServiceTest.Store();
+        var store = new ConfigurationServiceTest.InMemoryPolicyStore();
         var configuration = new ConfigurationService(store);
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
@@ -52,7 +52,7 @@ class SpiffingPluginTest {
         interceptor.interceptPacket(uncheckedMessage, null, true, false);
         assertNull(uncheckedMessage.getElement().element(PolicyConfiguration.ENVELOPE));
         assertTrue(runtime.replies.isEmpty());
-        plugin.save(Fixtures.settings());
+        configuration.savePolicy(Fixtures.foodPolicy());
         assertTrue(plugin.isConfigured());
         var message = new Message();
         interceptor.interceptPacket(message, null, true, false);
@@ -65,16 +65,14 @@ class SpiffingPluginTest {
         assertFalse(runtime.features.contains(CatalogService.NAMESPACE));
         assertFalse(runtime.features.contains(PolicyIqHandler.NAMESPACE));
         plugin.initializePlugin(null, null);
-        assertEquals(Fixtures.settings(), plugin.getSettings());
+        assertEquals(1, plugin.configurationService().policies().size());
         plugin.destroyPlugin();
     }
 
     @Test void corruptedStartupStillRegistersEnforcementAndAdminSaveRecovers() {
         var runtime = new Runtime();
-        var store = new ConfigurationServiceTest.Store();
-        var s = Fixtures.settings();
-        // Simulate corrupted stored settings, e.g. a policy edited outside the Admin Console.
-        store.value = new Settings("not a valid Open XML SPIF", s.clearance(), s.clearanceFormat(), s.defaultLabel(), s.labelFormat(), s.outputFormat(), s.enforcementMode());
+        var store = new ConfigurationServiceTest.InMemoryPolicyStore();
+        store.policies.put(Fixtures.foodPolicy().id(), new SecurityPolicy(Fixtures.foodPolicy().id(), "Corrupt", "not a valid SPIF", null, null, null, null, false));
         var configuration = new ConfigurationService(store);
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
@@ -82,7 +80,7 @@ class SpiffingPluginTest {
         assertTrue(plugin.isCorrupted());
         assertEquals(1, runtime.interceptors.size());
         assertThrows(PacketRejectedException.class, () -> runtime.interceptors.get(0).interceptPacket(new Message(), null, true, false));
-        plugin.save(Fixtures.settings());
+        configuration.savePolicy(Fixtures.foodPolicy());
         assertTrue(plugin.isConfigured());
         assertFalse(plugin.isCorrupted());
         plugin.destroyPlugin();
@@ -90,11 +88,11 @@ class SpiffingPluginTest {
 
     @Test void addsListsAndRemovesCatalogEntriesThroughThePlugin() {
         var runtime = new Runtime();
-        var store = new ConfigurationServiceTest.Store();
+        var store = new ConfigurationServiceTest.InMemoryPolicyStore();
         var configuration = new ConfigurationService(store);
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
-        plugin.save(Fixtures.settings());
+        configuration.savePolicy(Fixtures.foodPolicy());
         var entry = plugin.catalogService().add("Milk chocolate", "Food|Chocolate", LabelFormat.XML, Fixtures.read("food-label-milk-chocolate"), true);
         assertEquals(1, plugin.catalogService().entries().size());
         assertTrue(plugin.catalogService().entries().get(0).isDefault());

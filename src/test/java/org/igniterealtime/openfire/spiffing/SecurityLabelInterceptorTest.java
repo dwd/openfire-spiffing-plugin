@@ -1,5 +1,6 @@
 package org.igniterealtime.openfire.spiffing;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
@@ -10,9 +11,17 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.*;
 
 class SecurityLabelInterceptorTest {
-    private final PolicyConfiguration configuration = new PolicyConfiguration(Fixtures.settings());
+    private final PolicyConfiguration configuration = Fixtures.configuration();
     private final List<Message> replies = new ArrayList<>();
     private final SecurityLabelInterceptor interceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
+
+    @BeforeEach
+    void setUp() {
+        SpiffingProperties.setEnforcementMode(EnforcementMode.ENFORCE);
+        SpiffingProperties.setStripDefaultLabelForFederation(false);
+        SpiffingProperties.setOutputFormat(LabelFormat.ESS);
+        replies.clear();
+    }
 
     private Message message() {
         Message message = new Message();
@@ -90,8 +99,8 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void warnModeLogsAndAllowsDeniedMessageThroughUnchanged() throws Exception {
-        var warnConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN));
-        var warnInterceptor = new SecurityLabelInterceptor(() -> warnConfiguration, replies::add);
+        SpiffingProperties.setEnforcementMode(EnforcementMode.WARN);
+        var warnInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.ESS));
         String before = message.toXML();
@@ -101,11 +110,11 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void warnModeLogsAndAllowsDuplicateEnvelopesThrough() throws Exception {
-        var warnConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.WARN));
-        var warnInterceptor = new SecurityLabelInterceptor(() -> warnConfiguration, replies::add);
+        SpiffingProperties.setEnforcementMode(EnforcementMode.WARN);
+        var warnInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var message = message();
-        message.getElement().add(warnConfiguration.defaultEnvelope());
-        message.getElement().add(warnConfiguration.defaultEnvelope());
+        message.getElement().add(configuration.defaultEnvelope());
+        message.getElement().add(configuration.defaultEnvelope());
         String before = message.toXML();
         warnInterceptor.interceptPacket(message, null, true, false);
         assertEquals(before, message.toXML());
@@ -149,7 +158,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void missingConfigurationBlocksUnlabelledMessages() {
-        var interceptor = new SecurityLabelInterceptor(() -> null, replies::add);
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> true, replies::add);
         var message = message();
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, null, true, false));
         assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
@@ -195,14 +204,14 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void replyDeliveryFailureStillRejectsOriginal() {
-        var interceptor = new SecurityLabelInterceptor(() -> null, reply -> { throw new IllegalStateException("no route"); });
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> true, reply -> { throw new IllegalStateException("no route"); });
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message(), null, true, false));
     }
 
     @Test void absentSenderCannotCreateUnaddressedError() {
         var message = message();
         message.setFrom((JID) null);
-        var interceptor = new SecurityLabelInterceptor(() -> null, replies::add);
+        var interceptor = new SecurityLabelInterceptor(() -> null, () -> true, replies::add);
         assertThrows(PacketRejectedException.class, () -> interceptor.interceptPacket(message, null, true, false));
         assertTrue(replies.isEmpty());
     }
@@ -222,17 +231,18 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void stripsLabelMatchingDefaultMarkingBeforeSendingToAnotherServer() throws Exception {
-        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
-        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        SpiffingProperties.setStripDefaultLabelForFederation(true);
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var message = message();
-        message.getElement().add(strippingConfiguration.defaultEnvelope());
+        message.getElement().add(configuration.defaultEnvelope());
         strippingInterceptor.interceptPacket(message, outgoingServerSession(), false, false);
         assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
         assertTrue(replies.isEmpty());
     }
 
     @Test void doesNotStripWhenOptionIsDisabled() throws Exception {
-        var message = message(); // `configuration` fixture defaults to stripDefaultLabelForFederation=false
+        SpiffingProperties.setStripDefaultLabelForFederation(false);
+        var message = message();
         message.getElement().add(configuration.defaultEnvelope());
         String before = message.toXML();
         interceptor.interceptPacket(message, outgoingServerSession(), false, false);
@@ -240,8 +250,8 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void doesNotStripLabelWithADifferentDisplayMarking() throws Exception {
-        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.XML, EnforcementMode.ENFORCE, true));
-        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        SpiffingProperties.setStripDefaultLabelForFederation(true);
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.XML));
         String before = message.toXML();
@@ -250,12 +260,11 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void doesNotStripForLocalClientDelivery() throws Exception {
-        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
-        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        SpiffingProperties.setStripDefaultLabelForFederation(true);
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var message = message();
-        message.getElement().add(strippingConfiguration.defaultEnvelope());
+        message.getElement().add(configuration.defaultEnvelope());
         String before = message.toXML();
-        // A plain (non-outgoing-server) session, e.g. a local client, must never have its label stripped.
         var localSession = (org.jivesoftware.openfire.session.Session) java.lang.reflect.Proxy.newProxyInstance(
             getClass().getClassLoader(), new Class<?>[]{org.jivesoftware.openfire.session.Session.class},
             (proxy, method, args) -> { throw new AssertionError("Stripping must not depend on session state"); });
@@ -265,6 +274,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void doesNotStripWithoutConfiguration() throws Exception {
+        SpiffingProperties.setStripDefaultLabelForFederation(true);
         var unconfigured = new SecurityLabelInterceptor(() -> null, replies::add);
         var message = message();
         message.getElement().add(configuration.defaultEnvelope());
@@ -275,17 +285,17 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void doesNotStripAfterProcessedOrMultipleLabels() throws Exception {
-        var strippingConfiguration = new PolicyConfiguration(Fixtures.settings(LabelFormat.ESS, EnforcementMode.ENFORCE, true));
-        var strippingInterceptor = new SecurityLabelInterceptor(() -> strippingConfiguration, replies::add);
+        SpiffingProperties.setStripDefaultLabelForFederation(true);
+        var strippingInterceptor = new SecurityLabelInterceptor(() -> configuration, replies::add);
         var afterSend = message();
-        afterSend.getElement().add(strippingConfiguration.defaultEnvelope());
+        afterSend.getElement().add(configuration.defaultEnvelope());
         String beforeAfterSend = afterSend.toXML();
         strippingInterceptor.interceptPacket(afterSend, outgoingServerSession(), false, true);
         assertEquals(beforeAfterSend, afterSend.toXML());
 
         var duplicated = message();
-        duplicated.getElement().add(strippingConfiguration.defaultEnvelope());
-        duplicated.getElement().add(strippingConfiguration.defaultEnvelope());
+        duplicated.getElement().add(configuration.defaultEnvelope());
+        duplicated.getElement().add(configuration.defaultEnvelope());
         String beforeDuplicated = duplicated.toXML();
         strippingInterceptor.interceptPacket(duplicated, outgoingServerSession(), false, false);
         assertEquals(beforeDuplicated, duplicated.toXML());
@@ -299,7 +309,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void federatedInboundLabelPermittedByPeerClearanceIsAccepted() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-all-okay");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -310,7 +320,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void federatedInboundLabelDeniedByPeerClearanceIsRejectedInEnforceMode() {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -319,7 +329,8 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void federatedInboundLabelDeniedByPeerClearanceIsWarnedAboutInWarnMode() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.WARN));
+        SpiffingProperties.setEnforcementMode(EnforcementMode.WARN);
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -330,7 +341,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void localInboundIsNotCheckedAgainstPeerClearanceEvenWhenConfigured() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -341,7 +352,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void unlabelledFederatedInboundIsCheckedAgainstPeerClearanceBeforeStampingDefault() {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         assertThrows(PacketRejectedException.class, () -> peerInterceptor.interceptPacket(message, incomingServerSession(), true, false));
@@ -350,7 +361,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void egressLabelPermittedByPeerClearanceIsSentUnchanged() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-all-okay", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-all-okay");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -361,7 +372,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void egressLabelDeniedByPeerClearanceIsRejectedInEnforceMode() {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -370,7 +381,8 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void egressLabelDeniedByPeerClearanceIsWarnedAboutAndLeavesUnchangedInWarnMode() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.WARN));
+        SpiffingProperties.setEnforcementMode(EnforcementMode.WARN);
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var message = message();
         message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
@@ -381,8 +393,8 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void egressPeerClearanceCheckIsANoOpWithoutAConfiguredPeerClearance() throws Exception {
-        var message = message(); // `configuration` fixture has no peer clearance configured
-        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.XML)); // denied by the server clearance
+        var message = message();
+        message.getElement().add(Fixtures.envelope("food-label-water", LabelFormat.XML));
         String before = message.toXML();
         interceptor.interceptPacket(message, outgoingServerSession(), false, false);
         assertEquals(before, message.toXML());
@@ -390,7 +402,7 @@ class SecurityLabelInterceptorTest {
     }
 
     @Test void egressPeerClearanceCheckIsSkippedForLocalDeliveryAndAfterProcessed() throws Exception {
-        var peerConfiguration = new PolicyConfiguration(Fixtures.settingsWithPeerClearance("food-clearance-lactose-intolerant", EnforcementMode.ENFORCE));
+        var peerConfiguration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
         var peerInterceptor = new SecurityLabelInterceptor(() -> peerConfiguration, replies::add);
         var localMessage = message();
         localMessage.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));

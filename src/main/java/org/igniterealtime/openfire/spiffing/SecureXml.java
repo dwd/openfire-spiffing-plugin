@@ -7,6 +7,8 @@ import java.io.StringReader;
 final class SecureXml {
     static final int MAX_DOCUMENT = 1_048_576;
     static final int MAX_LABEL = 65_536;
+    static final int MAX_TREE_ELEMENTS = 64;
+    static final int MAX_TREE_DEPTH = 16;
 
     private SecureXml() {}
 
@@ -15,6 +17,10 @@ final class SecureXml {
             throw new IllegalArgumentException("Document is missing or exceeds the size limit.");
         }
         return text;
+    }
+
+    static Element parse(String xml) {
+        return parse(xml, MAX_LABEL);
     }
 
     static Element parse(String xml, int limit) {

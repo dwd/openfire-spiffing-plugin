@@ -33,7 +33,11 @@ September 25, 2026 (see "Build and dependency compatibility" below). The
 plugin's `provided`/parent dependency was moved from Openfire 5.0.0 to
 5.2.0-SNAPSHOT (no released 5.2.0 exists yet), which also raised the pinned
 Bouncy Castle version to 1.84, on September 25, 2026 (see "Build and
-dependency compatibility" below).
+dependency compatibility" below). Direct file upload for SPIF policies was
+added to the Admin Console on October 4, 2026 (see "SPIF file upload" below).
+Catalogue entry names were made optional in the catalogue editor on October 8,
+2026, defaulting to the display marking calculated from the label (see
+"Label catalogue" below).
 
 ## Objective and confirmed requirements
 
@@ -696,6 +700,38 @@ plugin assembly jar was built, all resolved against the locally cached
 compatibility variant (matching the now-superseded 5.0.0 release line) was not
 re-run in this session.
 
+## Database-backed policies and partial configuration
+
+The configuration persistence model was reworked from individual `JiveGlobals`
+property strings into dedicated database tables and selective `SystemProperty`
+definitions:
+
+- **Database tables (`ofSpiffingPolicy` and `ofSpiffingClearance`)**:
+  - `ofSpiffingPolicy` stores security policies (`policyID`, `policyName`, `spif`,
+    nullable `clearance`, nullable `clearanceFormat`, nullable `defaultLabel`,
+    nullable `defaultLabelFormat`, `isDefault`).
+  - `ofSpiffingClearance` stores peer clearances (`clearanceID`, `domain`,
+    `policyID`, `clearance`, `format`), where `domain = ""` indicates the default
+    peer clearance.
+  - Allows individual SPIFs to be added, updated, or deleted independently.
+- **Selective `SystemProperty` usage**:
+  - Global operational preferences (`plugin.spiffing.enforcementMode`,
+    `plugin.spiffing.outputFormat`, `plugin.spiffing.stripDefaultLabelForFederation`)
+    use `SystemProperty`.
+  - Properties check for existing registrations with `SystemProperty.getProperty(...).orElseGet(...)`
+    during class initialization (`SpiffingProperties.<clinit>`), preventing `IllegalArgumentException`
+    and `ExceptionInInitializerError` across dynamic plugin and JSP reloads.
+- **Partial configuration**:
+  - Policies can be configured with or without clearances and default labels.
+  - The Admin Console displays advisory warning prompts when clearances or default
+    labels are unconfigured rather than failing closed on partial setups.
+  - Inbound and outbound message labels are validated against loaded SPIFs; when a
+    clearance is present on another policy, Spiffing translates labels across
+    equivalent policies to evaluate authorization.
+- **Test verification**:
+  - The full suite was verified with `mvn verify`: **157 tests passed**, with no
+    failures or skips, JSP compilation passed, and the plugin assembly JAR was built.
+
 ## Label catalogue (XEP-0258 `urn:xmpp:sec-label:catalog:2`)
 
 The catalogue is a separate, administrator-curated list of named security labels
@@ -733,12 +769,15 @@ with the user before implementation:
   still publishes a single, server-wide catalogue (no per-recipient catalogue
   content is added beyond this ACDF filtering) and does not change the
   locality check above.
-- **Entry content**: each entry has a name, an optional XEP-0258 `selector`
+- **Entry content**: each entry has a name (which may be omitted in the Admin
+  Console catalogue editor, in which case it defaults to the display marking
+  calculated from the label's policy evaluation), an optional XEP-0258 `selector`
   (validated as a `|`-separated non-empty path), a `LabelFormat` (ESS, NATO XML,
   or Spiffy XML, reusing the existing enum), and its own label payload. The
   payload is independently validated against the currently active policy and
   clearance via `PolicyConfiguration.encodeCatalogLabel`, exactly like the
-  default label, rather than only referencing already-known labels.
+  default label, rather than only referencing already-known labels. If the name
+  is omitted and the label produces no display marking, entry creation is rejected.
 - **Default flag**: exactly one entry may be flagged as the catalogue's
   `<item default="true"/>` (`CatalogEntry.isDefault`). Adding a new default
   entry clears the flag on any previous default (`CatalogStore.clearDefault`)
@@ -824,6 +863,82 @@ unregisters both on destroy. The plugin's `Runtime` interface's
 `addIqHandler`/`removeIqHandler` methods were generalized from taking a
 `CatalogIqHandler` specifically to the common `IQHandler` supertype, so both
 handlers share the same registration methods.
+
+## SPIF file upload
+
+Administrators can supply Open XML SPIF policy documents on the Admin Console
+settings page (`spiffing-settings.jsp`) either by uploading a file or by pasting/editing
+the XML text directly:
+
+- **File picker and drag-and-drop**: a file input (`#spifFile`, accepting `.xml` and `.spif`
+  files) and drop listener on the document textarea (`#spif`) read the selected SPIF file
+  directly in the browser using the HTML5 `FileReader` API.
+- **Immediate inspection and editing**: the loaded file content is populated into the
+  textarea, allowing administrators to inspect, verify, or adjust the XML before submitting
+  the form.
+- **Client and server validation**: the client validates the 1 MiB size limit before
+  populating the form, and server-side validation (`SettingsForm.parsePolicy`) continues to
+  enforce SPIF schema validity and database persistence via `ConfigurationService`.
+
+## Clearance UX and interactive builder
+
+Administrators can configure server clearances and peer clearances on `spiffing-settings.jsp`
+using an interactive visual builder in addition to raw payload uploads:
+
+- **Dual configuration mode**: both the policy editing box and peer clearance section offer a
+  toggle between **Interactive Builder** (visual checklist) and **Raw Payload / File Upload** mode.
+- **Visual classification and category selection**:
+  - Classifications: checklists displaying policy classification names, LACVs, hierarchy levels,
+    and visual color swatches.
+  - Security categories: grouped fieldsets displaying tag sets, tag names, tag types (permissive,
+    restrictive, enumerated), and category names with LACVs. Informative tags/categories are
+    excluded since Spiffing does not permit informative tags as clearance privileges.
+- **Dynamic and pre-rendered inspection**:
+  - When editing existing policies, `SettingsForm.inspectPolicy` pre-populates active classification
+    and category selections and policy display markings (`displayMarking(Clearance)`).
+  - When creating a new policy or modifying the SPIF textarea, client-side DOM parsing dynamically
+    extracts classification levels and security categories in real time.
+- **File upload and drag-and-drop**:
+  - File pickers (`#clearanceFile`, `#peerClearanceFile`) and drop zones support `.xml`, `.b64`,
+    `.ber`, `.der`, and `.txt` files (bounded to 64 KiB).
+  - Binary DER/BER files are read as array buffers and automatically encoded to Base64 with ESS
+    format selection; XML files are read as text with automatic NATO/XML format detection.
+- **Backend clearance construction**: `SettingsForm.buildClearance` programmatically constructs
+  `io.cridland.spiffing.Clearance` objects from submitted selections and encodes them via
+  `LabelFormat.encode(Clearance)` (supporting XML, NATO XML, and Base64 ESS DER). Validation
+  rejects malformed LACVs, unknown specs, or informative category assignments.
+
+## Label UX and interactive builder
+
+Administrators can configure policy default message labels (`spiffing-settings.jsp`) and
+catalogue label entries (`spiffing-catalog.jsp`) using an interactive visual builder and file upload
+in addition to raw payload input:
+
+- **Dual configuration mode**: both default message label configuration and catalogue entry addition
+  provide a toggle between **Interactive Builder** and **Raw Payload / File Upload** modes.
+- **Visual label builder**:
+  - Classification selection: single-choice radio buttons displaying classification names, LACVs,
+    hierarchy levels, and color swatches. In policy default label settings, a "(None / Unset)" option
+    allows leaving the policy default label unset.
+  - Security categories: grouped fieldsets displaying tag sets and non-informative/informative
+    categories with tag types and LACVs.
+  - Live policy display marking: active default labels and catalogue entries show the policy-derived
+    human-readable marking (`displayMarking(Label)`).
+  - In catalogue entry management, administrators can select which active security policy to build the
+    label from.
+- **File upload and drag-and-drop**:
+  - File inputs (`#defaultLabelFile`, `#catalogLabelFile`) and drop zones support `.xml`, `.b64`,
+    `.ber`, `.der`, and `.txt` files (bounded to 64 KiB).
+  - Binary DER/BER labels are automatically Base64-encoded with ESS format selection, and XML/NATO
+    documents are auto-detected.
+- **Backend label construction**:
+  - `SettingsForm.buildLabel` creates `io.cridland.spiffing.Label` instances from SPIF policies,
+    classification LACVs, and category specs, serializing to XML, NATO XML, or ESS formats via
+    `LabelFormat.encode(Label)`.
+  - `CatalogForm.add` parses builder mode parameters (`classification`, `catalogCategories`, `spif`)
+    to construct and encode catalogue labels before saving to `CatalogService`.
+  - `SettingsForm.inspectPolicy` extracts active default label classifications, categories, and display
+    markings into `PolicyClearanceMetadata`.
 
 ## Deferred features
 

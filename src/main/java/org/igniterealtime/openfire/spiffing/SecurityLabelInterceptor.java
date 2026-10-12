@@ -21,11 +21,8 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
     private final Supplier<Boolean> corrupted;
     private final Consumer<Message> reply;
 
-    /** Convenience constructor that treats a missing snapshot as corrupted/fail-closed, matching this
-     * interceptor's original behavior; prefer the three-argument constructor in production so a plugin
-     * that was simply never configured fails open instead (see {@link #interceptPacket}). */
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Consumer<Message> reply) {
-        this(configuration, () -> true, reply);
+        this(configuration, () -> false, reply);
     }
 
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Supplier<Boolean> corrupted, Consumer<Message> reply) {
@@ -38,10 +35,6 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
     public void interceptPacket(Packet packet, Session session, boolean incoming, boolean processed) throws PacketRejectedException {
         if (!(packet instanceof Message message)) return;
         if (!incoming) {
-            // Egress: before a message leaves for another server, check its effective label against the
-            // configured peer clearance (a no-op when none is configured), following the same enforcement
-            // mode as every other label check. This runs before the optional, best-effort default-label
-            // stripping below, so a stripped label was still checked against the peer clearance first.
             if (!processed && session instanceof OutgoingServerSession) {
                 checkPeerClearanceForFederation(message);
                 stripDefaultLabelForFederation(message);
@@ -50,63 +43,54 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         }
         if (processed) return;
         var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
-        // XEP-0258 §6: errors are not authorized or stamped, and labelled errors are discarded.
         if (message.getType() == Message.Type.error) {
             if (!labels.isEmpty()) throw new PacketRejectedException();
             return;
         }
         PolicyConfiguration snapshot = configuration.get();
-        if (snapshot == null) {
-            // A plugin that was never configured at all (no policy, default label, or server clearance
-            // ever saved) is simply inactive: let the message through completely untouched, so installing
-            // the plugin never disrupts existing traffic. Corrupted persisted settings (something was
-            // saved but failed to load/validate) still fail closed, exactly as before.
+        if (snapshot == null || !snapshot.hasPolicies()) {
             if (corrupted.get()) reject(message, PacketError.Condition.service_unavailable);
             return;
         }
-        // Ingress: a message arriving from a federated peer is also checked against the peer clearance,
-        // in addition to the server clearance that every inbound message is always checked against.
         boolean fromPeer = session instanceof IncomingServerSession;
+        String peerDomain = fromPeer && message.getFrom() != null ? message.getFrom().getDomain() : "";
+        EnforcementMode enforcementMode = SpiffingProperties.getEnforcementMode();
         try {
-            if (labels.size() > 1) throw new IllegalArgumentException();
+            if (labels.size() > 1) throw new IllegalArgumentException("Multiple security label envelopes are not permitted.");
             if (labels.isEmpty()) {
-                if (fromPeer) snapshot.checkDefaultPeerClearance();
-                message.getElement().add(snapshot.defaultEnvelope());
+                if (snapshot.hasDefaultLabel()) {
+                    if (fromPeer) snapshot.checkDefaultPeerClearance(peerDomain);
+                    message.getElement().add(snapshot.defaultEnvelope());
+                }
             } else {
                 Element original = labels.get(0);
-                Element checked = snapshot.check(original, fromPeer);
+                Element checked = snapshot.check(original, fromPeer, peerDomain);
                 if (checked != original) {
                     original.detach();
                     message.getElement().add(checked);
                 }
             }
         } catch (RuntimeException e) {
-            if (snapshot.settings().enforcementMode() == EnforcementMode.ENFORCE) {
+            if (enforcementMode == EnforcementMode.ENFORCE) {
                 reject(message, PacketError.Condition.forbidden);
             } else {
-                // Warn mode: log without the message body/label content and let the message through unchanged.
                 LOG.warn("Security label check failed for message from {} to {} (id {}): {}. Enforcement mode is warn, so the message was allowed through.",
                     message.getFrom(), message.getTo(), message.getID(), e.getMessage());
             }
         }
     }
 
-    /**
-     * Checks an outbound message's effective label against the configured peer clearance before it leaves
-     * for another server, following {@code Settings.enforcementMode} exactly like every other label check
-     * (ENFORCE rejects, WARN logs and lets the message through unchanged). A missing/unconfigured snapshot,
-     * no configured peer clearance, an absent label, or more than one label are all left unchecked here,
-     * matching {@link #stripDefaultLabelForFederation}'s fail-open scope for those same conditions.
-     */
     private void checkPeerClearanceForFederation(Message message) throws PacketRejectedException {
         PolicyConfiguration snapshot = configuration.get();
-        if (snapshot == null) return;
+        if (snapshot == null || !snapshot.hasPolicies()) return;
         var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
         if (labels.size() != 1) return;
+        String peerDomain = message.getTo() != null ? message.getTo().getDomain() : "";
+        EnforcementMode enforcementMode = SpiffingProperties.getEnforcementMode();
         try {
-            snapshot.checkPeerClearance(labels.get(0));
+            snapshot.checkPeerClearance(labels.get(0), peerDomain);
         } catch (RuntimeException e) {
-            if (snapshot.settings().enforcementMode() == EnforcementMode.ENFORCE) {
+            if (enforcementMode == EnforcementMode.ENFORCE) {
                 reject(message, PacketError.Condition.forbidden);
             } else {
                 LOG.warn("Peer clearance check failed for message from {} to {} (id {}) leaving for another server: {}. Enforcement mode is warn, so the message was allowed through.",
@@ -115,24 +99,19 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         }
     }
 
-    /**
-     * Removes an outbound label whose display marking matches the configured default's, so that
-     * federated traffic does not gratuitously carry the default label to another server. Only a single,
-     * well-formed envelope with a non-empty marking equal to the default's is eligible; anything else
-     * (no configuration, the option disabled, no label, more than one label, or a different/absent
-     * marking) is left completely unchanged.
-     */
     private void stripDefaultLabelForFederation(Message message) {
         PolicyConfiguration snapshot = configuration.get();
-        if (snapshot == null || !snapshot.settings().stripDefaultLabelForFederation()) return;
+        if (snapshot == null || !SpiffingProperties.isStripDefaultLabelForFederation()) return;
         var labels = message.getElement().elements(PolicyConfiguration.ENVELOPE);
         if (labels.size() != 1) return;
         String defaultMarking = snapshot.defaultDisplayMarking();
         if (defaultMarking == null || defaultMarking.isEmpty()) return;
         try {
-            if (defaultMarking.equals(PolicyConfiguration.displayMarking(labels.get(0)))) labels.get(0).detach();
+            if (defaultMarking.equals(PolicyConfiguration.displayMarking(labels.get(0)))) {
+                labels.get(0).detach();
+            }
         } catch (RuntimeException e) {
-            // A malformed label is not our concern here; leave the message exactly as it arrived.
+            // Ignore malformed label here
         }
     }
 
@@ -149,7 +128,6 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
                 // Delivery failure must never allow the rejected original to proceed.
             }
         }
-        // Replies are sent explicitly for both local and remote senders. No router-generated second reply.
         throw new PacketRejectedException();
     }
 }
