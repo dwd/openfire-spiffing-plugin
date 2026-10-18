@@ -16,7 +16,7 @@ CREATE TABLE ofSpiffingPolicy (
   clearanceFormat       VARCHAR(16),
   defaultLabel          LONGVARCHAR,
   defaultLabelFormat    VARCHAR(16),
-  isDefault             INTEGER         NOT NULL DEFAULT 0,
+  isDefault             INTEGER         DEFAULT 0 NOT NULL,
   CONSTRAINT ofSpiffingPolicy_pk PRIMARY KEY (policyID)
 );
 

@@ -86,6 +86,46 @@ class SpiffingPluginTest {
         plugin.destroyPlugin();
     }
 
+    @Test void bootstrapsPolicyFromFileWhenNoneConfiguredYet() throws Exception {
+        var tempFile = java.nio.file.Files.createTempFile("spiffing-bootstrap-", ".xml");
+        try {
+            java.nio.file.Files.writeString(tempFile, Fixtures.read("food-policy"));
+            SpiffingProperties.setBootstrapPolicyFile(tempFile.toString());
+            var runtime = new Runtime();
+            var store = new ConfigurationServiceTest.InMemoryPolicyStore();
+            var configuration = new ConfigurationService(store);
+            var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
+            plugin.initializePlugin(null, null);
+            assertTrue(plugin.isConfigured());
+            assertEquals(1, plugin.configurationService().policies().size());
+            assertEquals("Food", plugin.configurationService().policies().get(0).name());
+            plugin.destroyPlugin();
+        } finally {
+            SpiffingProperties.setBootstrapPolicyFile(null);
+            java.nio.file.Files.deleteIfExists(tempFile);
+        }
+    }
+
+    @Test void bootstrapDoesNotOverrideAnExistingPolicy() throws Exception {
+        var tempFile = java.nio.file.Files.createTempFile("spiffing-bootstrap-", ".xml");
+        try {
+            java.nio.file.Files.writeString(tempFile, Fixtures.read("food-policy"));
+            SpiffingProperties.setBootstrapPolicyFile(tempFile.toString());
+            var runtime = new Runtime();
+            var store = new ConfigurationServiceTest.InMemoryPolicyStore();
+            store.policies.put(Fixtures.drinkPolicy().id(), Fixtures.drinkPolicy());
+            var configuration = new ConfigurationService(store);
+            var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
+            plugin.initializePlugin(null, null);
+            assertEquals(1, plugin.configurationService().policies().size());
+            assertEquals("Drink", plugin.configurationService().policies().get(0).name());
+            plugin.destroyPlugin();
+        } finally {
+            SpiffingProperties.setBootstrapPolicyFile(null);
+            java.nio.file.Files.deleteIfExists(tempFile);
+        }
+    }
+
     @Test void addsListsAndRemovesCatalogEntriesThroughThePlugin() {
         var runtime = new Runtime();
         var store = new ConfigurationServiceTest.InMemoryPolicyStore();

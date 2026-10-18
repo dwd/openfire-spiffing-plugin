@@ -1,5 +1,10 @@
 package org.igniterealtime.openfire.spiffing;
 
+import io.cridland.spiffing.Classification;
+import io.cridland.spiffing.Clearance;
+import io.cridland.spiffing.Label;
+import io.cridland.spiffing.Site;
+import io.cridland.spiffing.Spif;
 import org.jivesoftware.openfire.XMPPServer;
 import org.jivesoftware.openfire.container.Plugin;
 import org.jivesoftware.openfire.container.PluginManager;
@@ -11,6 +16,10 @@ import org.xmpp.packet.JID;
 import org.xmpp.packet.Message;
 
 import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 
 public final class SpiffingPlugin implements Plugin {
     private static final Logger LOG = LoggerFactory.getLogger(SpiffingPlugin.class);
@@ -66,6 +75,7 @@ public final class SpiffingPlugin implements Plugin {
         } catch (IllegalArgumentException e) {
             LOG.error("Stored Spiffing configuration is invalid; inbound messages are blocked. Reconfigure in the Admin Console.");
         }
+        bootstrapPolicyIfConfigured();
         interceptor = new SecurityLabelInterceptor(configuration::current, configuration::isCorrupted, runtime::reply);
         runtime.addInterceptor(interceptor);
         runtime.addFeature(PolicyConfiguration.NAMESPACE);
@@ -93,6 +103,41 @@ public final class SpiffingPlugin implements Plugin {
             runtime.removeIqHandler(policyIqHandler);
             runtime.removeFeature(PolicyIqHandler.NAMESPACE);
             policyIqHandler = null;
+        }
+    }
+
+    /**
+     * If {@link SpiffingProperties#getBootstrapPolicyFile()} points at a SPIF document and no
+     * policy has been configured yet (i.e. the store is empty, typically a fresh install), loads
+     * that document and saves it as the server's default policy, with a server clearance and
+     * default outgoing message label both set to the policy's lowest (least restrictive)
+     * classification. This exists so test/dev deployments (see
+     * {@link SpiffingProperties#BOOTSTRAP_POLICY_FILE}'s documentation) end up with a working
+     * policy without needing to drive the Admin Console UI by hand; it is a no-op whenever the
+     * property isn't set, or a policy already exists, so it never overrides an administrator's
+     * own configuration.
+     */
+    private void bootstrapPolicyIfConfigured() {
+        String path = SpiffingProperties.getBootstrapPolicyFile();
+        if (path == null || path.isBlank()) return;
+        if (!configuration.policies().isEmpty()) return;
+        try {
+            String spifXml = Files.readString(Path.of(path), StandardCharsets.UTF_8);
+            Spif spif = new Site().load(spifXml);
+            Classification lowest = spif.defaultClassification();
+            Clearance clearance = SettingsForm.buildClearance(spif, List.of(lowest.lacv().toString()), List.of());
+            Label defaultLabel = new Label(spif, lowest.lacv());
+            LabelFormat format = LabelFormat.XML;
+            SecurityPolicy policy = new SecurityPolicy(
+                spif.policyId(), spif.name(), spifXml,
+                format.encode(clearance), format,
+                format.encode(defaultLabel), format,
+                true
+            );
+            configuration.savePolicy(policy);
+            LOG.info("Bootstrapped Spiffing policy '{}' from {}", spif.name(), path);
+        } catch (Exception e) {
+            LOG.error("Failed to bootstrap Spiffing policy from {}: {}", path, e.getMessage(), e);
         }
     }
 

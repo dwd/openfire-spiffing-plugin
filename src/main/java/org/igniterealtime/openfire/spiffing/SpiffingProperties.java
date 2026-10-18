@@ -9,6 +9,8 @@ public final class SpiffingProperties {
     private static volatile String enforcementModeOverride;
     private static volatile Boolean stripDefaultOverride;
     private static volatile String outputFormatOverride;
+    private static volatile String bootstrapPolicyFileOverride;
+    private static volatile boolean bootstrapPolicyFileOverrideSet;
 
     @SuppressWarnings("unchecked")
     public static final SystemProperty<String> ENFORCEMENT_MODE =
@@ -34,6 +36,30 @@ public final class SpiffingProperties {
             .orElseGet(() -> SystemProperty.Builder.ofType(String.class)
                 .setKey("plugin.spiffing.outputFormat")
                 .setDefaultValue("ESS")
+                .setDynamic(true)
+                .build());
+
+    /**
+     * Absolute path to a SPIF document that should be loaded automatically as the server's
+     * default policy on plugin startup, but only while no policy has been configured yet (i.e.
+     * on a fresh install). Intended for test/dev deployments (e.g. Wimsy's Maestro Openfire
+     * instance; see that project's maestro/docker-compose.yml) that need a known security-label
+     * policy in place without manual Admin Console setup, rather than for production use.
+     * <p>
+     * Resolved, in order of precedence, from: an explicit {@link #setBootstrapPolicyFile(String)}
+     * override (mainly for tests); the {@code spiffing.bootstrapPolicyFile} JVM system property;
+     * the {@code SPIFFING_BOOTSTRAP_POLICY_FILE} environment variable; and finally this
+     * database-backed {@link SystemProperty}. The system property/environment variable forms
+     * exist because this needs to be readable during a fresh container's very first boot (e.g.
+     * Docker/Maestro setup), before Openfire's database-backed property store is necessarily
+     * populated or even reachable.
+     */
+    @SuppressWarnings("unchecked")
+    public static final SystemProperty<String> BOOTSTRAP_POLICY_FILE =
+        (SystemProperty<String>) SystemProperty.getProperty("plugin.spiffing.bootstrapPolicyFile")
+            .orElseGet(() -> SystemProperty.Builder.ofType(String.class)
+                .setKey("plugin.spiffing.bootstrapPolicyFile")
+                .setDefaultValue(null)
                 .setDynamic(true)
                 .build());
 
@@ -64,6 +90,29 @@ public final class SpiffingProperties {
         outputFormatOverride = format.name();
         try {
             OUTPUT_FORMAT.setValue(format.name());
+        } catch (Exception ignored) {}
+    }
+
+    public static String getBootstrapPolicyFile() {
+        if (bootstrapPolicyFileOverrideSet) {
+            return bootstrapPolicyFileOverride;
+        }
+        String sysProp = System.getProperty("spiffing.bootstrapPolicyFile");
+        if (sysProp != null && !sysProp.isBlank()) {
+            return sysProp;
+        }
+        String envVar = System.getenv("SPIFFING_BOOTSTRAP_POLICY_FILE");
+        if (envVar != null && !envVar.isBlank()) {
+            return envVar;
+        }
+        return BOOTSTRAP_POLICY_FILE.getValue();
+    }
+
+    public static void setBootstrapPolicyFile(String path) {
+        bootstrapPolicyFileOverride = path;
+        bootstrapPolicyFileOverrideSet = true;
+        try {
+            BOOTSTRAP_POLICY_FILE.setValue(path);
         } catch (Exception ignored) {}
     }
 
