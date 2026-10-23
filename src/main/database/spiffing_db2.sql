@@ -29,4 +29,22 @@ CREATE TABLE ofSpiffingClearance (
   CONSTRAINT ofSpiffingClearance_pk PRIMARY KEY (clearanceID)
 );
 
-INSERT INTO ofVersion (name, version) VALUES ('spiffing', 1);
+CREATE TABLE ofSpiffingRoomClearance (
+  roomJID               VARCHAR(255)    NOT NULL,
+  policyID              VARCHAR(128)    NOT NULL,
+  clearance             CLOB            NOT NULL,
+  format                VARCHAR(16)     NOT NULL,
+  CONSTRAINT ofSpiffingRoomClearance_pk PRIMARY KEY (roomJID, policyID)
+);
+
+CREATE TABLE ofSpiffingRoomLabel (
+  roomJID               VARCHAR(255)    NOT NULL,
+  policyID              VARCHAR(128)    NOT NULL,
+  label                 CLOB            NOT NULL,
+  labelFormat           VARCHAR(16)     NOT NULL,
+  defaultLabel          CLOB,
+  defaultLabelFormat    VARCHAR(16),
+  CONSTRAINT ofSpiffingRoomLabel_pk PRIMARY KEY (roomJID)
+);
+
+INSERT INTO ofVersion (name, version) VALUES ('spiffing', 2);

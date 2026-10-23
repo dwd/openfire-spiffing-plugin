@@ -2,6 +2,7 @@ package org.igniterealtime.openfire.spiffing;
 
 import org.junit.jupiter.api.Test;
 import org.jivesoftware.openfire.handler.IQHandler;
+import org.jivesoftware.openfire.interceptor.PacketInterceptor;
 import org.jivesoftware.openfire.interceptor.PacketRejectedException;
 import org.xmpp.packet.JID;
 import org.xmpp.packet.Message;
@@ -10,12 +11,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class SpiffingPluginTest {
     static final class Runtime implements SpiffingPlugin.Runtime {
-        final List<SecurityLabelInterceptor> interceptors = new ArrayList<>();
+        final List<PacketInterceptor> interceptors = new ArrayList<>();
         final List<IQHandler> iqHandlers = new ArrayList<>();
         final List<Message> replies = new ArrayList<>();
         final Set<String> features = new HashSet<>();
-        public void addInterceptor(SecurityLabelInterceptor i) { interceptors.add(i); }
-        public void removeInterceptor(SecurityLabelInterceptor i) { assertTrue(interceptors.remove(i)); }
+        public void addInterceptor(PacketInterceptor i) { interceptors.add(i); }
+        public void removeInterceptor(PacketInterceptor i) { assertTrue(interceptors.remove(i)); }
         public void addFeature(String namespace) { features.add(namespace); }
         public void removeFeature(String namespace) { features.remove(namespace); }
         public void addIqHandler(IQHandler handler) { iqHandlers.add(handler); }
@@ -39,7 +40,7 @@ class SpiffingPluginTest {
         var plugin = new SpiffingPlugin(configuration, new CatalogService(new CatalogStoreFake(), configuration::current), runtime);
         plugin.initializePlugin(null, null);
         plugin.initializePlugin(null, null);
-        assertEquals(1, runtime.interceptors.size());
+        assertEquals(2, runtime.interceptors.size());
         assertEquals(2, runtime.iqHandlers.size());
         assertTrue(runtime.features.contains(PolicyConfiguration.NAMESPACE));
         assertTrue(runtime.features.contains(CatalogService.NAMESPACE));
@@ -78,7 +79,7 @@ class SpiffingPluginTest {
         plugin.initializePlugin(null, null);
         assertFalse(plugin.isConfigured());
         assertTrue(plugin.isCorrupted());
-        assertEquals(1, runtime.interceptors.size());
+        assertEquals(2, runtime.interceptors.size());
         assertThrows(PacketRejectedException.class, () -> runtime.interceptors.get(0).interceptPacket(new Message(), null, true, false));
         configuration.savePolicy(Fixtures.foodPolicy());
         assertTrue(plugin.isConfigured());

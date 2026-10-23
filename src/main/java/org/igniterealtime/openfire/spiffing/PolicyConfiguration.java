@@ -322,6 +322,120 @@ public final class PolicyConfiguration {
     }
 
     /**
+     * Authorizes a message's effective label, about to enter a room, against that room's own
+     * clearance(s), one of which may apply if it is scoped to the label's policy (or a policy the
+     * label can be translated to). A room with no clearance for any loaded policy is a no-op,
+     * exactly like an unconfigured peer/user clearance: room clearances are optional, not
+     * mandatory. Raw, undecoded clearances are passed in and resolved here against this registry's
+     * {@code site}, mirroring {@link #checkUserClearance}.
+     */
+    public void checkRoomClearance(Element envelope, List<RoomClearance> roomClearances) {
+        checkRoomClearanceOnLabel(decode(envelope), roomClearances);
+    }
+
+    /** Like {@link #checkRoomClearance}, but tests the configured (server-wide) default label itself, for an unlabelled message entering a room that has no room-specific default/label of its own. */
+    public void checkDefaultRoomClearance(List<RoomClearance> roomClearances) {
+        if (defaultLabel == null) return;
+        checkRoomClearanceOnLabel(defaultLabel, roomClearances);
+    }
+
+    private Map<String, Clearance> resolveRoomClearances(List<RoomClearance> roomClearances) {
+        if (roomClearances == null || roomClearances.isEmpty()) return Map.of();
+        Map<String, Clearance> result = new LinkedHashMap<>();
+        for (RoomClearance rc : roomClearances) {
+            Spif spif = resolvePolicy(rc.policyId());
+            if (spif == null) continue; // Stale clearance for a policy no longer loaded; ignore.
+            try {
+                if (rc.format() == LabelFormat.XML || rc.format() == LabelFormat.NATO) {
+                    SecureXml.parse(rc.clearance(), SecureXml.MAX_LABEL);
+                }
+                Clearance c = site.clearance(rc.format().decode(rc.clearance()), rc.format().format);
+                if (c.policy() != spif) continue; // Mismatched policy; ignore rather than fail the whole message.
+                result.put(spif.policyId(), c);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("The room clearance for policy '" + rc.policyId() + "' is invalid.", e);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Decodes and validates a room's own stored label payload against this registry, used both to
+     * resolve the room's ambient classification for join-gating and to derive its default-label
+     * envelope when it has no independently configured default (see {@link RoomLabel}).
+     */
+    public Label decodeRoomLabel(String payload, LabelFormat format) {
+        try {
+            if (format == LabelFormat.XML || format == LabelFormat.NATO) {
+                SecureXml.parse(payload, SecureXml.MAX_LABEL);
+            }
+            Label label = site.label(format.decode(payload), format.format);
+            if (!label.policy().valid(label)) {
+                throw new IllegalArgumentException("The room label is not valid under its policy.");
+            }
+            return label;
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new IllegalArgumentException("The room label is invalid or cannot be decoded.", e);
+        }
+    }
+
+    /**
+     * Encodes the label that should stamp a room's own unlabelled outgoing messages: the room's
+     * independently configured default label when it has one, otherwise the room label itself
+     * (see {@link RoomLabel}'s javadoc for why these are allowed to diverge). Also authorizes the
+     * resolved label against the room's own clearance(s) first, exactly like
+     * {@link #checkDefaultPeerClearance}/{@link #checkDefaultUserClearance} test the server default
+     * before it is attached.
+     */
+    public Element encodeRoomDefaultEnvelope(RoomLabel roomLabel, List<RoomClearance> roomClearances) {
+        Label effective = roomLabel.hasOwnDefaultLabel()
+            ? decodeRoomLabel(roomLabel.defaultLabel(), roomLabel.defaultLabelFormat())
+            : decodeRoomLabel(roomLabel.label(), roomLabel.format());
+        checkRoomClearanceOnLabel(effective, roomClearances);
+        return encode(effective, outputFormat);
+    }
+
+    /** Authorizes an already-decoded label against a room's own clearance(s); shared by {@link #checkRoomClearance}, {@link #checkDefaultRoomClearance}, and {@link #encodeRoomDefaultEnvelope}. */
+    private void checkRoomClearanceOnLabel(Label label, List<RoomClearance> roomClearances) {
+        Map<String, Clearance> clearances = resolveRoomClearances(roomClearances);
+        if (clearances.isEmpty()) return;
+        authorizeAgainstClearances(label, clearances, "room ");
+    }
+
+    /**
+     * Authorizes a room's label against a local joining user's own clearances; used to gate room
+     * joins (see {@link RoomLabel}). Unlike {@link #checkUserClearance}, a joining user with
+     * <em>no</em> applicable clearance at all is explicitly denied rather than treated as a no-op:
+     * once a room has a label configured, the issue's requirement is that a user has "no ...
+     * capability to join the room unless the label was passed by" their own clearance.
+     */
+    public void authorizeRoomJoinByUserClearance(Label roomLabel, List<UserClearance> userClearances) {
+        Map<String, Clearance> clearances = resolveUserClearances(userClearances);
+        if (clearances.isEmpty()) {
+            throw new IllegalArgumentException("No user clearance available to authorize the room label.");
+        }
+        authorizeAgainstClearances(roomLabel, clearances, "user ");
+    }
+
+    /**
+     * Authorizes a room's label against a federated peer's clearance for their domain; used to
+     * gate room joins (see {@link RoomLabel}). Like {@link #authorizeRoomJoinByUserClearance}, an
+     * absent/unconfigured peer clearance for that domain is explicitly denied, not a no-op.
+     */
+    public void authorizeRoomJoinByPeerClearance(Label roomLabel, String domain) {
+        Map<String, Clearance> clearances = peerClearancesByDomain.get(domain == null ? "" : domain);
+        if (clearances == null || clearances.isEmpty()) {
+            clearances = peerClearancesByDomain.get("");
+        }
+        if (clearances == null || clearances.isEmpty()) {
+            throw new IllegalArgumentException("No peer clearance available to authorize the room label.");
+        }
+        authorizeAgainstClearances(roomLabel, clearances, "peer ");
+    }
+
+    /**
      * Authorizes the message's effective label against the sender's own clearances, one of which
      * may apply if it is scoped to the label's policy (or a policy the label can be translated to).
      * A sender with no clearance for any loaded policy is a no-op, exactly like an unconfigured

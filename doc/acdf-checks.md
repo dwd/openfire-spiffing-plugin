@@ -36,6 +36,15 @@ Clearances are stored in the database (`ofSpiffingPolicy` and `ofSpiffingClearan
   sender JID's node is looked up (`UserClearanceService.list`) and every
   returned clearance is consulted against the message's effective label,
   translating across loaded policies exactly like server/peer clearances.
+- **Room Clearances**: Configured in the `ofSpiffingRoomClearance` database
+  table, keyed by `(roomJID, policyID)`, independently of `ofSpiffingPolicy`/
+  `ofSpiffingClearance`. A room may hold a clearance for
+  several different loaded policies at once, like a user clearance. When a
+  message is addressed to a room's bare JID, every room clearance for that
+  room is consulted against the message's effective label, translating
+  across loaded policies exactly like server/peer/user clearances. A room
+  clearance gates labels of messages *entering* the room; it does not gate
+  who may *join* the room (that is the room label's job, below).
 
 ## Objects that have a label
 
@@ -64,8 +73,19 @@ or the underlying Spiffing `Label`), each with its own lifecycle:
   are individually decoded, validated, and translated/verified for equivalence against
   the primary label.
 
+- **The room label**: Configured in the `ofSpiffingRoomLabel` database table,
+  one row per room JID (a room has exactly one label, unlike the
+  multiple-policies-at-once room clearance). A room's label is an ambient
+  classification, checked against a *joining* user's/peer's clearance, not
+  against a message's label; a room's own, independently optional default
+  label (`defaultLabel`/`defaultLabelFormat`) stamps that room's unlabelled
+  outgoing messages, falling back to the room label itself when unset.
+
 User clearances themselves do not carry a label; they are consulted as an
 additional clearance (see above), the same way server and peer clearances are.
+Room clearances are likewise consulted, not carried; the room label above is
+the one new object in this increment that is actually a label, not a
+clearance.
 
 ## Points in a message's lifetime where checks occur
 
@@ -75,7 +95,12 @@ and, since the "Peer clearance" increment, also on the **egress** path to a
 federated peer, but only for the narrower peer-clearance decision (see below).
 Since the "User clearance" increment, the inbound path's server-clearance
 decision is additionally joined by a user-clearance decision when the sender
-is a local client (see step 3/4 below). Nothing else in a message's lifetime
+is a local client (see step 3/4 below). Since the "Room clearance and room
+label" increment, the inbound path's checks are additionally joined by a
+room-clearance decision whenever the message is addressed to a room (also
+steps 3/4 below); joining a room is a wholly separate event from sending a
+message and is checked at a different hook entirely (see "Room joins" further
+below). Nothing else in a message's lifetime
 is re-checked. The `SecurityLabelInterceptor` callback (`incoming &&
 !processed`, i.e. before Openfire's `MessageRouter` processes the packet)
 does the following, for every non-error message:
@@ -94,19 +119,31 @@ does the following, for every non-error message:
    unchecked and unmodified: no stamping, no access-control decision, no
    reply. This distinction was added so that installing the plugin can never
    disrupt existing traffic before an administrator configures it.
-3. **Unlabelled messages are stamped, and, from a federated peer or a local
-   sender with a clearance, also checked first.** A message with no direct
-   envelope receives a copy of the already-validated default; there is
-   normally nothing to run server-clearance ACDF against, because the sender
-   supplied nothing. However, when the message arrives via an
+3. **Unlabelled messages are stamped, and, from a federated peer, a local
+   sender with a clearance, or a message addressed to a room, also checked
+   first.** A message with no direct envelope receives a copy of the
+   already-validated default (or, when addressed to a room with its own
+   `RoomLabel` configured, the room's own default label, falling back to the
+   room label itself — see below); there is normally nothing to run
+   server-clearance ACDF against, because the sender supplied nothing.
+   However, when the message arrives via an
    `IncomingServerSession`, `PolicyConfiguration.checkDefaultPeerClearance()`
    first tests the *default* label itself against the peer clearance (a no-op
    without one configured); and, for a local sender, `checkDefaultUserClearance()`
    likewise tests it against any clearances configured for that sender's
    username (a no-op if they have none) — both before the default is attached.
+   **When the message is addressed to a room**, the label that will actually
+   be stamped (the room's own default label, or the room label, or — if
+   the room has no `RoomLabel` configured at all — the server-wide default)
+   is additionally tested against every room clearance configured for that
+   room (`PolicyConfiguration.checkDefaultRoomClearance()`/
+   `encodeRoomDefaultEnvelope()`, a no-op without one configured), before it
+   is attached.
 4. **A single labelled envelope is validated and access-checked exactly
    once against the server clearance, plus once more against the peer
-   clearance for federated senders or the user clearance for local senders.**
+   clearance for federated senders, the user clearance for local senders, or
+   the room clearance for a room-addressed message (these are not mutually
+   exclusive with each other).**
    `PolicyConfiguration.check` bounds the
    XML tree, decodes the primary label (and any equivalent labels) under
    whichever loaded policy the label itself declares, translates it to the
@@ -120,8 +157,14 @@ does the following, for every non-error message:
    against any clearances configured for the sender's username (a no-op
    without any); a federated peer's message is never checked against a user
    clearance, since its sender JID's node is a remote user this server has no
-   authority over. In both cases, equivalent labels are **not** re-tested
-   against the peer or user clearance, only the effective primary label. An empty
+   authority over. **Independently of sender locality**, if the message is
+   addressed to a room's bare JID, `PolicyConfiguration.checkRoomClearance`
+   tests the same effective label against every room clearance configured for
+   that room (a no-op without any) — a message can therefore be checked
+   against the server clearance, one of peer/user clearance, *and* the room
+   clearance, all for the same message. In all cases, equivalent labels are **not**
+   re-tested
+   against the peer, user, or room clearance, only the effective primary label. An empty
    primary `<label/>` is treated as an explicit request for the default and
    replaced with a fresh copy after validating any equivalents. More than one
    direct envelope is always rejected as malformed.
@@ -131,8 +174,8 @@ does the following, for every non-error message:
    (sender, recipient, stanza ID, and reason — never the body or label
    payload) and lets the message through completely unchanged. This applies
    identically whether the failure came from the server-clearance, the
-   peer-clearance, or the user-clearance decision — there is no separate
-   enforcement knob for either the peer or the user clearance.
+   peer-clearance, the user-clearance, or the room-clearance decision — there
+   is no separate enforcement knob for the peer, user, or room clearance.
 
 Everything else in the message's lifetime is explicitly **not** checked
 again, with one narrower exception on egress to a federated peer:
@@ -198,7 +241,51 @@ again, with one narrower exception on egress to a federated peer:
   `PacketInterceptor` entirely** (some server-generated messages, history
   replay, and room fan-out, per `doc/design.md`'s "Rejection and Openfire
   integration evidence" section) never reach this plugin's code at all, so
-  they are checked neither on the way in nor on the way out.
+  they are checked neither on the way in nor on the way out. This includes
+  the room-clearance check above: it only sees the stanza addressed to the
+  room's bare JID as it enters the server, not any per-occupant fan-out copy.
+
+## Room joins
+
+Unlike every other check in this document, a room join is not a message at
+all, and is checked at a completely different Openfire extension point: there
+is no `PacketInterceptor` callback for a MUC join, so `RoomJoinGate`
+(installed via `MultiUserChatService.setMUCDelegate`) hooks
+`MUCEventDelegate.joiningRoom(MUCRoom, JID)` instead.
+
+- **A room with no configured `RoomLabel` performs no check at all** (and
+  defers entirely to any pre-existing wrapped delegate's own decision,
+  Openfire allows only one delegate per service). This is the same opt-in
+  default as every other clearance/label feature in this plugin: installing
+  it cannot newly block joins to a room nobody has configured a label for.
+- **A room with a configured `RoomLabel` performs exactly one `acdf` check
+  per join attempt, against the joining party's own clearance — never against
+  a message label, since there isn't one.** `PolicyConfiguration.decodeRoomLabel`
+  decodes and validates the room's label under its claimed policy (raising if
+  it fails to parse, exactly like any other stored clearance/label); then,
+  depending on whether the joining JID is local or remote
+  (`isLocal.test(userjid)`): `authorizeRoomJoinByUserClearance` runs `acdf`
+  against every `UserClearance` the local user holds, or
+  `authorizeRoomJoinByPeerClearance` runs it against the peer clearance for
+  the remote user's domain.
+- **Unlike every message-level check in this document, an absent clearance
+  here is an explicit denial, not a no-op.** A local user with zero
+  configured clearances, or a remote domain with no peer clearance
+  configured at all, is denied the join outright once the room has a label
+  — there is no "clearance not configured, so allow through" fallback the way
+  there is for peer/user/room *message* clearance. This matches the issue's
+  explicit wording that a user should have "no visibility or capability to
+  join the room unless the label was passed by" their own clearance.
+- **Enforcement mode is honored the same way as every other check**:
+  `ENFORCE` denies the join outright (`joiningRoom` returns `false`); `WARN`
+  logs the denial and allows the join through unchanged. There is no separate
+  enforcement knob for room joins.
+- **A pre-existing wrapped delegate's own denial short-circuits before the
+  label check ever runs**, and every other `MUCEventDelegate` callback
+  (invitations, room config, destruction, recreation) is passed straight
+  through to the wrapped delegate unchanged, or a permissive default when
+  there is none — `RoomJoinGate` only ever adds a new way to *deny* a join,
+  never a new way to approve one a pre-existing delegate already denied.
 
 In short: one server-clearance access-control decision (ACDF plus policy
 validity) is made per ordinary inbound message, at the single pre-processing
@@ -207,11 +294,19 @@ peer-clearance-only `acdf` decision (a no-op without a configured peer
 clearance), at that same inbound hook or at the pre-send outbound hook,
 respectively; a local-client inbound message instead additionally gets one
 user-clearance-only `acdf` decision per clearance the sender holds (a no-op
-without any), at that same inbound hook. No message is re-checked at any
-other point in its lifetime. This entire pipeline only runs once the plugin
+without any), at that same inbound hook; a message addressed to a room
+additionally gets one room-clearance-only `acdf` decision per room clearance
+configured for that room (a no-op without any), at that same inbound hook,
+independently of whichever of the above also applies. No message is
+re-checked at any
+other point in its lifetime. Joining a room is a separate event, checked at a
+different hook (`MUCEventDelegate`, not `PacketInterceptor`): a room with a
+configured label gets exactly one `acdf` decision per join attempt, against
+the joining party's own user or peer clearance, with an absent clearance
+treated as an explicit denial rather than a no-op. This entire pipeline only runs once the plugin
 has an active or corrupted configuration to react to; a plugin that has never
 been configured at all performs no check whatsoever and never touches a
-message.
+message or a join.
 
 ## Summary table
 
@@ -232,3 +327,6 @@ message.
 | Label catalogue `get` request, `to=` absent or local | Yes, `acdf` against the server clearance only, re-run per entry | Served if `from` is local; entries failing the server clearance are omitted |
 | Label catalogue `get` request, `to=` a non-local recipient | Yes, `acdf` against the server clearance **and** the peer clearance (no-op if unconfigured), re-run per entry | Served if `from` is local and `to=` is a well-formed JID; entries failing either check are omitted |
 | Policy discovery `get` request (list or fetch by id/name) | No (locality check only) | Served if `from` is local; returns already-loaded policy id/name/document, not re-validated per request |
+| Inbound, before processing (addressed to a room) | Yes, `acdf` against every room clearance configured for that room (no-op if none), **in addition to** whichever server/peer/user row above also applies | Accepted/stamped unchanged, or rejected/warned, same as the corresponding row above |
+| MUC join attempt, room has no configured room label | No | Allowed (deferring to any pre-existing wrapped delegate) |
+| MUC join attempt, room has a configured room label | Yes, `acdf` against the joining local user's own clearance(s), or the joining remote peer's domain clearance | Allowed if any clearance passes; denied/warned otherwise — an absent clearance is an explicit denial, not a no-op |

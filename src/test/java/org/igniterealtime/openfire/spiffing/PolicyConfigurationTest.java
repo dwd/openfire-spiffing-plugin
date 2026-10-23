@@ -406,4 +406,111 @@ class PolicyConfigurationTest {
         var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
         assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, List.of(uc)));
     }
+
+    @Test void noRoomClearanceIsANoOp() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkRoomClearance(envelope, List.of()));
+        assertDoesNotThrow(() -> configuration.checkRoomClearance(envelope, null));
+        assertDoesNotThrow(() -> configuration.checkDefaultRoomClearance(List.of()));
+    }
+
+    @Test void checkPermitsLabelWhenRoomClearanceIsPermissive() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var rc = new RoomClearance("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkRoomClearance(envelope, List.of(rc)));
+    }
+
+    @Test void checkRejectsLabelDeniedByRoomClearanceEvenWhenServerClearancePermitsIt() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var rc = new RoomClearance("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.checkRoomClearance(envelope, List.of(rc)));
+    }
+
+    @Test void checkDefaultRoomClearanceAgainstTheConfiguredDefaultLabel() {
+        var configuration = Fixtures.configuration();
+        var permissive = new RoomClearance("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkDefaultRoomClearance(List.of(permissive)));
+        var restrictive = new RoomClearance("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.checkDefaultRoomClearance(List.of(restrictive)));
+    }
+
+    @Test void roomClearanceForAStalePolicyIsIgnored() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var stale = new RoomClearance("room@conference.example.com", "1.2.826.0.1.9999999", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkRoomClearance(envelope, List.of(stale)));
+    }
+
+    @Test void decodeRoomLabelValidatesAgainstThePolicy() {
+        var configuration = Fixtures.configuration();
+        assertDoesNotThrow(() -> configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML));
+        assertThrows(IllegalArgumentException.class, () -> configuration.decodeRoomLabel("not a label", LabelFormat.XML));
+    }
+
+    @Test void encodeRoomDefaultEnvelopeFallsBackToTheRoomLabelWhenNoOwnDefaultIsSet() {
+        var configuration = Fixtures.configuration();
+        var roomLabel = new RoomLabel("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML, null, null);
+        var envelope = configuration.encodeRoomDefaultEnvelope(roomLabel, List.of());
+        assertNotNull(envelope);
+    }
+
+    @Test void encodeRoomDefaultEnvelopeUsesTheRoomsOwnDefaultLabelWhenConfigured() {
+        var configuration = Fixtures.configuration();
+        var roomLabel = new RoomLabel(
+            "room@conference.example.com", "1.2.826.0.1.6726289.0.0",
+            Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML,
+            Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML
+        );
+        assertTrue(roomLabel.hasOwnDefaultLabel());
+        var envelope = configuration.encodeRoomDefaultEnvelope(roomLabel, List.of());
+        assertNotNull(envelope);
+    }
+
+    @Test void encodeRoomDefaultEnvelopeChecksTheRoomClearanceFirst() {
+        var configuration = Fixtures.configuration();
+        var roomLabel = new RoomLabel("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML, null, null);
+        var restrictive = new RoomClearance("room@conference.example.com", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.encodeRoomDefaultEnvelope(roomLabel, List.of(restrictive)));
+    }
+
+    @Test void authorizeRoomJoinByUserClearancePermitsAUserWithAPassingClearance() {
+        var configuration = Fixtures.configuration();
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.authorizeRoomJoinByUserClearance(label, List.of(uc)));
+    }
+
+    @Test void authorizeRoomJoinByUserClearanceDeniesAUserWithNoClearanceAtAll() {
+        var configuration = Fixtures.configuration();
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.authorizeRoomJoinByUserClearance(label, List.of()));
+    }
+
+    @Test void authorizeRoomJoinByUserClearanceDeniesAUserWithAFailingClearance() {
+        var configuration = Fixtures.configuration();
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.authorizeRoomJoinByUserClearance(label, List.of(uc)));
+    }
+
+    @Test void authorizeRoomJoinByPeerClearancePermitsAPeerWithAPassingClearance() {
+        var configuration = Fixtures.configurationWithPeerClearance("food-clearance-all-okay");
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.authorizeRoomJoinByPeerClearance(label, "peer.example.com"));
+    }
+
+    @Test void authorizeRoomJoinByPeerClearanceDeniesAPeerWithNoClearanceConfigured() {
+        var configuration = Fixtures.configuration();
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.authorizeRoomJoinByPeerClearance(label, "peer.example.com"));
+    }
+
+    @Test void authorizeRoomJoinByPeerClearanceDeniesAPeerWithAFailingClearance() {
+        var configuration = Fixtures.configurationWithPeerClearance("food-clearance-lactose-intolerant");
+        var label = configuration.decodeRoomLabel(Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.authorizeRoomJoinByPeerClearance(label, "peer.example.com"));
+    }
 }

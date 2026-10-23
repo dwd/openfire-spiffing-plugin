@@ -232,6 +232,118 @@ public final class SettingsForm {
         return new UserClearance(username.trim(), policyId.trim(), clearance, format);
     }
 
+    public static RoomClearance parseRoomClearance(Map<String, String> fields) {
+        return parseRoomClearance(fields, null, null, null);
+    }
+
+    public static RoomClearance parseRoomClearance(Map<String, String> fields, Collection<String> classifications, Collection<String> categories, Spif spif) {
+        String roomJid = fields.get("roomJid");
+        if (roomJid == null || roomJid.isBlank()) {
+            throw new IllegalArgumentException("Room JID is required for a room clearance.");
+        }
+        String policyId = fields.get("policyId");
+        if (policyId == null || policyId.isBlank()) {
+            throw new IllegalArgumentException("Policy selection is required for a room clearance.");
+        }
+
+        String clearanceMode = fields.get("clearanceMode");
+        String clearance;
+        LabelFormat format;
+        String formatStr = fields.get("format");
+
+        if ("builder".equalsIgnoreCase(clearanceMode)) {
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.ESS;
+            boolean hasClassifications = classifications != null && classifications.stream().anyMatch(c -> c != null && !c.isBlank());
+            boolean hasCategories = categories != null && categories.stream().anyMatch(c -> c != null && !c.isBlank());
+            if (!hasClassifications && !hasCategories) {
+                throw new IllegalArgumentException("At least one classification or category must be selected for a room clearance in builder mode.");
+            }
+            if (spif == null) {
+                throw new IllegalArgumentException("SPIF policy is required to build a room clearance.");
+            }
+            Clearance c = buildClearance(spif, classifications, categories);
+            clearance = format.encode(c);
+        } else {
+            clearance = fields.get("clearance");
+            if (clearance == null || clearance.isBlank()) {
+                throw new IllegalArgumentException("Clearance document is required.");
+            }
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.ESS;
+        }
+
+        return new RoomClearance(roomJid.trim(), policyId.trim(), clearance, format);
+    }
+
+    public static RoomLabel parseRoomLabel(Map<String, String> fields) {
+        return parseRoomLabel(fields, null, null, null, null, null);
+    }
+
+    public static RoomLabel parseRoomLabel(
+        Map<String, String> fields,
+        String labelClassification,
+        Collection<String> labelCategories,
+        String defaultLabelClassification,
+        Collection<String> defaultLabelCategories,
+        Spif spif
+    ) {
+        String roomJid = fields.get("roomJid");
+        if (roomJid == null || roomJid.isBlank()) {
+            throw new IllegalArgumentException("Room JID is required for a room label.");
+        }
+        String policyId = fields.get("policyId");
+        if (policyId == null || policyId.isBlank()) {
+            throw new IllegalArgumentException("Policy selection is required for a room label.");
+        }
+
+        String labelMode = fields.get("labelMode");
+        String label;
+        LabelFormat format;
+        String formatStr = fields.get("format");
+
+        if ("builder".equalsIgnoreCase(labelMode)) {
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.XML;
+            if (spif == null) {
+                throw new IllegalArgumentException("SPIF policy is required to build a room label.");
+            }
+            io.cridland.spiffing.Label l = buildLabel(spif, labelClassification, labelCategories);
+            label = format.encode(l);
+        } else {
+            label = fields.get("label");
+            if (label == null || label.isBlank()) {
+                throw new IllegalArgumentException("Room label document is required.");
+            }
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.XML;
+        }
+
+        String defaultLabelMode = fields.get("defaultLabelMode");
+        String defaultLabel;
+        LabelFormat defaultLabelFormat;
+
+        if ("builder".equalsIgnoreCase(defaultLabelMode)) {
+            String defaultLabelFormatStr = fields.get("defaultLabelFormat");
+            defaultLabelFormat = defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
+                ? LabelFormat.valueOf(defaultLabelFormatStr) : LabelFormat.XML;
+            if (defaultLabelClassification != null && !defaultLabelClassification.isBlank()) {
+                if (spif == null) {
+                    throw new IllegalArgumentException("SPIF policy is required to build a default label.");
+                }
+                io.cridland.spiffing.Label l = buildLabel(spif, defaultLabelClassification, defaultLabelCategories);
+                defaultLabel = defaultLabelFormat.encode(l);
+            } else {
+                defaultLabel = null;
+                defaultLabelFormat = null;
+            }
+        } else {
+            defaultLabel = fields.get("defaultLabel");
+            if (defaultLabel != null && defaultLabel.isBlank()) defaultLabel = null;
+            String defaultLabelFormatStr = fields.get("defaultLabelFormat");
+            defaultLabelFormat = defaultLabel != null && defaultLabelFormatStr != null && !defaultLabelFormatStr.isBlank()
+                ? LabelFormat.valueOf(defaultLabelFormatStr) : null;
+        }
+
+        return new RoomLabel(roomJid.trim(), policyId.trim(), label, format, defaultLabel, defaultLabelFormat);
+    }
+
     public static Clearance buildClearance(Spif spif, Collection<String> classificationLacvs, Collection<String> categorySpecs) {
         Objects.requireNonNull(spif, "spif");
         Clearance clearance = new Clearance(spif);

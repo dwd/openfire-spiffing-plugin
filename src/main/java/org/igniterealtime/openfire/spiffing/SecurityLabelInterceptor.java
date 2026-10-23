@@ -8,13 +8,16 @@ import org.jivesoftware.openfire.session.OutgoingServerSession;
 import org.jivesoftware.openfire.session.Session;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.xmpp.packet.JID;
 import org.xmpp.packet.Message;
 import org.xmpp.packet.Packet;
 import org.xmpp.packet.PacketError;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 public final class SecurityLabelInterceptor implements PacketInterceptor {
@@ -22,6 +25,9 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
     private final Supplier<PolicyConfiguration> configuration;
     private final Supplier<Boolean> corrupted;
     private final Function<String, List<UserClearance>> userClearances;
+    private final Predicate<JID> isRoom;
+    private final Function<String, List<RoomClearance>> roomClearances;
+    private final Function<String, Optional<RoomLabel>> roomLabel;
     private final Consumer<Message> reply;
 
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Consumer<Message> reply) {
@@ -38,9 +44,24 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         Function<String, List<UserClearance>> userClearances,
         Consumer<Message> reply
     ) {
+        this(configuration, corrupted, userClearances, jid -> false, roomJid -> List.of(), roomJid -> Optional.empty(), reply);
+    }
+
+    public SecurityLabelInterceptor(
+        Supplier<PolicyConfiguration> configuration,
+        Supplier<Boolean> corrupted,
+        Function<String, List<UserClearance>> userClearances,
+        Predicate<JID> isRoom,
+        Function<String, List<RoomClearance>> roomClearances,
+        Function<String, Optional<RoomLabel>> roomLabel,
+        Consumer<Message> reply
+    ) {
         this.configuration = configuration;
         this.corrupted = corrupted;
         this.userClearances = userClearances;
+        this.isRoom = isRoom;
+        this.roomClearances = roomClearances;
+        this.roomLabel = roomLabel;
         this.reply = reply;
     }
 
@@ -68,15 +89,23 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         boolean fromPeer = session instanceof IncomingServerSession;
         String peerDomain = fromPeer && message.getFrom() != null ? message.getFrom().getDomain() : "";
         String senderUsername = !fromPeer && message.getFrom() != null ? message.getFrom().getNode() : null;
+        JID to = message.getTo();
+        boolean toRoom = to != null && isRoom.test(to);
+        String roomBareJid = toRoom ? to.asBareJID().toString() : null;
+        List<RoomClearance> roomClearanceList = toRoom ? roomClearances.apply(roomBareJid) : List.of();
+        Optional<RoomLabel> roomLabelForMessage = toRoom ? roomLabel.apply(roomBareJid) : Optional.empty();
         EnforcementMode enforcementMode = SpiffingProperties.getEnforcementMode();
         try {
             if (labels.size() > 1) throw new IllegalArgumentException("Multiple security label envelopes are not permitted.");
             if (labels.isEmpty()) {
-                if (snapshot.hasDefaultLabel()) {
+                if (roomLabelForMessage.isPresent()) {
+                    message.getElement().add(snapshot.encodeRoomDefaultEnvelope(roomLabelForMessage.get(), roomClearanceList));
+                } else if (snapshot.hasDefaultLabel()) {
                     if (fromPeer) snapshot.checkDefaultPeerClearance(peerDomain);
                     if (senderUsername != null && !senderUsername.isBlank()) {
                         snapshot.checkDefaultUserClearance(userClearances.apply(senderUsername));
                     }
+                    if (toRoom) snapshot.checkDefaultRoomClearance(roomClearanceList);
                     message.getElement().add(snapshot.defaultEnvelope());
                 }
             } else {
@@ -85,6 +114,7 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
                 if (senderUsername != null && !senderUsername.isBlank()) {
                     snapshot.checkUserClearance(checked, userClearances.apply(senderUsername));
                 }
+                if (toRoom) snapshot.checkRoomClearance(checked, roomClearanceList);
                 if (checked != original) {
                     original.detach();
                     message.getElement().add(checked);

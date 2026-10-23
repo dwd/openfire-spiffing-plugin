@@ -483,4 +483,99 @@ class SecurityLabelInterceptorTest {
         userInterceptor.interceptPacket(message, incomingServerSession(), true, false);
         assertFalse(consulted[0], "Federated messages must be checked against peer clearance, not sender-node user clearance");
     }
+
+    private Message roomMessage() {
+        var message = message();
+        message.setTo("room@conference.local.example");
+        return message;
+    }
+
+    private SecurityLabelInterceptor roomInterceptor(java.util.function.Function<String, List<RoomClearance>> roomClearances, java.util.function.Function<String, java.util.Optional<RoomLabel>> roomLabel) {
+        return new SecurityLabelInterceptor(
+            () -> configuration, () -> false, username -> List.of(),
+            jid -> "room@conference.local.example".equals(jid.toBareJID()), roomClearances, roomLabel, replies::add
+        );
+    }
+
+    @Test void roomClearanceCheckIsANoOpWithoutAnyConfiguredRoomClearance() throws Exception {
+        var noRoomClearance = roomInterceptor(jid -> List.of(), jid -> java.util.Optional.empty());
+        var message = roomMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        noRoomClearance.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void labelPermittedByRoomClearanceIsAccepted() throws Exception {
+        var rc = new RoomClearance("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        var permissive = roomInterceptor(jid -> List.of(rc), jid -> java.util.Optional.empty());
+        var message = roomMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        permissive.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void labelDeniedByRoomClearanceIsRejectedInEnforceMode() {
+        var rc = new RoomClearance("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var restrictive = roomInterceptor(jid -> List.of(rc), jid -> java.util.Optional.empty());
+        var message = roomMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        assertThrows(PacketRejectedException.class, () -> restrictive.interceptPacket(message, null, true, false));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void messagesNotAddressedToARoomAreUnaffectedByRoomClearance() throws Exception {
+        var rc = new RoomClearance("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var restrictive = roomInterceptor(jid -> List.of(rc), jid -> java.util.Optional.empty());
+        var message = message(); // "to" is bob@local.example, not the room
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        restrictive.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void unlabelledMessageToARoomWithNoRoomLabelFallsBackToTheServerDefault() throws Exception {
+        var noRoomLabel = roomInterceptor(jid -> List.of(), jid -> java.util.Optional.empty());
+        var message = roomMessage();
+        noRoomLabel.interceptPacket(message, null, true, false);
+        assertEquals(configuration.defaultEnvelope().asXML(), message.getElement().element(PolicyConfiguration.ENVELOPE).asXML());
+    }
+
+    @Test void unlabelledMessageToARoomWithARoomLabelIsStampedWithTheRoomLabelItself() throws Exception {
+        var rl = new RoomLabel("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML, null, null);
+        var withRoomLabel = roomInterceptor(jid -> List.of(), jid -> java.util.Optional.of(rl));
+        var message = roomMessage();
+        withRoomLabel.interceptPacket(message, null, true, false);
+        var expected = configuration.encodeRoomDefaultEnvelope(rl, List.of());
+        assertEquals(expected.asXML(), message.getElement().element(PolicyConfiguration.ENVELOPE).asXML());
+    }
+
+    @Test void unlabelledMessageToARoomWithItsOwnDistinctDefaultIsStampedWithThatDefault() throws Exception {
+        var rl = new RoomLabel(
+            "room@conference.local.example", "1.2.826.0.1.6726289.0.0",
+            Fixtures.read("food-label-water"), LabelFormat.XML,
+            Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML
+        );
+        var withOwnDefault = roomInterceptor(jid -> List.of(), jid -> java.util.Optional.of(rl));
+        var message = roomMessage();
+        withOwnDefault.interceptPacket(message, null, true, false);
+        // The default label (milk chocolate) is stamped, not the room label itself (water).
+        var expected = configuration.encodeRoomDefaultEnvelope(rl, List.of());
+        assertEquals(expected.asXML(), message.getElement().element(PolicyConfiguration.ENVELOPE).asXML());
+        assertNotEquals(Fixtures.envelope("food-label-water", LabelFormat.ESS).asXML(), message.getElement().element(PolicyConfiguration.ENVELOPE).asXML());
+    }
+
+    @Test void unlabelledMessageToARoomIsCheckedAgainstTheRoomClearanceBeforeStamping() {
+        var rl = new RoomLabel("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-label-milk-chocolate"), LabelFormat.XML, null, null);
+        var rc = new RoomClearance("room@conference.local.example", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var restrictive = roomInterceptor(jid -> List.of(rc), jid -> java.util.Optional.of(rl));
+        var message = roomMessage();
+        assertThrows(PacketRejectedException.class, () -> restrictive.interceptPacket(message, null, true, false));
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
 }

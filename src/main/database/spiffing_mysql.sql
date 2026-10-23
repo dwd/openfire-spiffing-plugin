@@ -29,4 +29,22 @@ CREATE TABLE ofSpiffingClearance (
   PRIMARY KEY (clearanceID)
 ) ENGINE=InnoDB;
 
-INSERT INTO ofVersion (name, version) VALUES ('spiffing', 1);
+CREATE TABLE ofSpiffingRoomClearance (
+  roomJID               VARCHAR(255)    NOT NULL,
+  policyID              VARCHAR(128)    NOT NULL,
+  clearance             TEXT            NOT NULL,
+  format                VARCHAR(16)     NOT NULL,
+  PRIMARY KEY (roomJID, policyID)
+) ENGINE=InnoDB;
+
+CREATE TABLE ofSpiffingRoomLabel (
+  roomJID               VARCHAR(255)    NOT NULL,
+  policyID              VARCHAR(128)    NOT NULL,
+  label                 TEXT            NOT NULL,
+  labelFormat           VARCHAR(16)     NOT NULL,
+  defaultLabel          TEXT,
+  defaultLabelFormat    VARCHAR(16),
+  PRIMARY KEY (roomJID)
+) ENGINE=InnoDB;
+
+INSERT INTO ofVersion (name, version) VALUES ('spiffing', 2);

@@ -16,7 +16,7 @@
 
     <!-- Database schema for the label catalogue (src/main/database/spiffing_*.sql) -->
     <databaseKey>spiffing</databaseKey>
-    <databaseVersion>1</databaseVersion>
+    <databaseVersion>2</databaseVersion>
 
     <!-- Admin console entries -->
     <adminconsole>
@@ -38,6 +38,14 @@
                       name="Spiffing clearance"
                       url="spiffing-user-clearance.jsp"
                       description="This user's security clearance for one or more loaded Spiffing policies"/>
+            </sidebar>
+        </tab>
+        <tab id="tab-groupchat">
+            <sidebar id="sidebar-groupchat-options">
+                <item id="spiffing-room-clearance"
+                      name="Spiffing clearance"
+                      url="spiffing-room-clearance.jsp"
+                      description="This room's security clearance (for incoming message labels) and room label (for join-gating), for one or more loaded Spiffing policies"/>
             </sidebar>
         </tab>
     </adminconsole>

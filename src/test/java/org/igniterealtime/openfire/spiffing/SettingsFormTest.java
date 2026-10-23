@@ -370,4 +370,151 @@ class SettingsFormTest {
         assertEquals(Fixtures.read("food-label-milk-chocolate"), policy.defaultLabel());
         assertEquals(LabelFormat.XML, policy.defaultLabelFormat());
     }
+
+    @Test void parsesRoomClearance() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("clearance", Fixtures.read("food-clearance-all-okay"));
+        fields.put("format", "XML");
+
+        RoomClearance rc = SettingsForm.parseRoomClearance(fields);
+        assertEquals("room@conference.example.com", rc.roomJid());
+        assertEquals("1.2.826.0.1.6726289.0.0", rc.policyId());
+        assertEquals(Fixtures.read("food-clearance-all-okay"), rc.clearance());
+        assertEquals(LabelFormat.XML, rc.format());
+    }
+
+    @Test void parsesRoomClearanceInBuilderMode() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("clearanceMode", "builder");
+        fields.put("format", "NATO");
+
+        RoomClearance rc = SettingsForm.parseRoomClearance(
+            fields,
+            java.util.List.of("52"),
+            java.util.List.of(),
+            spif
+        );
+
+        assertEquals("room@conference.example.com", rc.roomJid());
+        assertEquals(LabelFormat.NATO, rc.format());
+        assertTrue(rc.clearance().contains("ConfidentialityClearance"));
+    }
+
+    @Test void parseRoomClearanceRequiresARoomJid() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("clearance", Fixtures.read("food-clearance-all-okay"));
+        fields.put("format", "XML");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parseRoomClearance(fields));
+    }
+
+    @Test void parseRoomClearanceRequiresAPolicy() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("clearance", Fixtures.read("food-clearance-all-okay"));
+        fields.put("format", "XML");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parseRoomClearance(fields));
+    }
+
+    @Test void parsesRoomLabel() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("label", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("format", "XML");
+
+        RoomLabel rl = SettingsForm.parseRoomLabel(fields);
+        assertEquals("room@conference.example.com", rl.roomJid());
+        assertEquals("1.2.826.0.1.6726289.0.0", rl.policyId());
+        assertEquals(Fixtures.read("food-label-milk-chocolate"), rl.label());
+        assertEquals(LabelFormat.XML, rl.format());
+        assertFalse(rl.hasOwnDefaultLabel());
+    }
+
+    @Test void parsesRoomLabelWithItsOwnDistinctDefaultLabel() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("label", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("format", "XML");
+        fields.put("defaultLabel", Fixtures.read("food-label-water"));
+        fields.put("defaultLabelFormat", "XML");
+
+        RoomLabel rl = SettingsForm.parseRoomLabel(fields);
+        assertTrue(rl.hasOwnDefaultLabel());
+        assertEquals(Fixtures.read("food-label-water"), rl.defaultLabel());
+        assertEquals(LabelFormat.XML, rl.defaultLabelFormat());
+    }
+
+    @Test void parsesRoomLabelInBuilderMode() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("labelMode", "builder");
+        fields.put("format", "NATO");
+
+        RoomLabel rl = SettingsForm.parseRoomLabel(
+            fields,
+            "52",
+            java.util.List.of("1.2.826.0.1.6726289.0.0.1|permissive|3"),
+            null,
+            java.util.List.of(),
+            spif
+        );
+
+        assertEquals(LabelFormat.NATO, rl.format());
+        assertTrue(rl.label().contains("ConfidentialityInformation"));
+        assertFalse(rl.hasOwnDefaultLabel());
+    }
+
+    @Test void parsesRoomLabelWithABuilderDefaultLabel() {
+        io.cridland.spiffing.Site site = new io.cridland.spiffing.Site();
+        io.cridland.spiffing.Spif spif = site.load(Fixtures.read("food-policy"));
+
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("label", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("format", "XML");
+        fields.put("defaultLabelMode", "builder");
+        fields.put("defaultLabelFormat", "XML");
+
+        RoomLabel rl = SettingsForm.parseRoomLabel(
+            fields,
+            null,
+            java.util.List.of(),
+            "51",
+            java.util.List.of(),
+            spif
+        );
+
+        assertTrue(rl.hasOwnDefaultLabel());
+        assertTrue(rl.defaultLabel().contains("51"));
+    }
+
+    @Test void parseRoomLabelRequiresARoomJid() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("policyId", "1.2.826.0.1.6726289.0.0");
+        fields.put("label", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("format", "XML");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parseRoomLabel(fields));
+    }
+
+    @Test void parseRoomLabelRequiresAPolicy() {
+        Map<String, String> fields = new HashMap<>();
+        fields.put("roomJid", "room@conference.example.com");
+        fields.put("label", Fixtures.read("food-label-milk-chocolate"));
+        fields.put("format", "XML");
+        assertThrows(IllegalArgumentException.class, () -> SettingsForm.parseRoomLabel(fields));
+    }
 }

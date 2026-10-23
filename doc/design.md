@@ -473,6 +473,12 @@ The adjacent Openfire source establishes the intended hook:
   `RoutingTable`/session delivery paths, including some server-generated messages,
   history replay, and room fan-out, do not necessarily re-enter it. The plugin does
   not claim per-recipient delivery filtering on those paths.
+- Room clearance (see "Room clearance and room label" below) is checked on this
+  same inbound hook, against the stanza addressed to the room's bare JID as it
+  enters the server; it inherits the same limitation and is not a claim of
+  per-occupant fan-out filtering. Room joins are checked via a different hook
+  entirely (`MultiUserChatService.setMUCDelegate`), since there is no
+  interceptor callback for MUC joins.
 
 Protocol behavior was checked against XEP-0258, both the local
 `../xeps/xep-0258.xml` and the retrieved published specification. The error-message
@@ -628,13 +634,50 @@ message objects. Coverage includes:
   `UserPropertyClearanceStore` is not unit-tested directly, matching the
   existing precedent for `UserManager`-backed adapters (see "Test coverage"
   entry for `JiveGlobalsConfigurationStore` above).
+- Room clearance and room label: `RoomClearanceTest`/`RoomLabelTest` cover
+  their own validation (missing/blank fields, an oversized payload, a
+  distinct default label falling back to unset when blank, a default label
+  requiring a format). `RoomClearanceServiceTest`/`RoomLabelServiceTest`
+  cover save/list/get/delete/replace against in-memory store fakes, the same
+  pattern as `UserClearanceServiceTest`. `PolicyConfigurationTest` covers
+  `checkRoomClearance`/`checkDefaultRoomClearance` (no-op, permissive accept,
+  restrictive reject, stale-policy ignored), `decodeRoomLabel`/
+  `encodeRoomDefaultEnvelope` (room-label fallback, an own distinct default,
+  and the room clearance being checked before the label is stamped), and
+  `authorizeRoomJoinByUserClearance`/`authorizeRoomJoinByPeerClearance`
+  (permit on a passing clearance, deny on a failing or wholly absent one —
+  confirming these are default-deny, unlike the optional message-level
+  checks). `SecurityLabelInterceptorTest` covers room-addressed messages:
+  the room-clearance check is a no-op without a configured room clearance,
+  permits/denies a label the same way peer/user clearance does, is
+  unaffected for messages not addressed to a room, and room-aware default
+  stamping (server-default fallback with no `RoomLabel`, the room label
+  itself, the room's own distinct default, and the room clearance being
+  checked before stamping). `RoomJoinGateTest` covers `checkJoin` directly
+  (factored out of `joiningRoom` so a live `MUCRoom` is not required): no
+  configured label allows anyone, local/remote permit and deny, warn-mode
+  leniency, no loaded policies as a no-op, a wrapped delegate's denial
+  short-circuiting before the label check, and the permissive defaults used
+  when there is no wrapped delegate. `RoomConfigFormInterceptorTest` covers
+  field injection for a single resolvable policy, omission when the policy is
+  ambiguous (zero or multiple, none marked default) or the IQ is not
+  room-addressed, reading submitted fields back into saved room
+  clearance/label, blank submitted fields deleting the existing room
+  clearance/label, and non-`muc#owner` IQs being ignored. `SettingsFormTest`
+  covers `parseRoomClearance`/`parseRoomLabel` in both raw and builder modes,
+  including the builder-mode default label and the required-field checks.
+  `DatabaseRoomClearanceStore`/`DatabaseRoomLabelStore` are not unit-tested
+  directly, matching the existing precedent for `DbConnectionManager`-backed
+  adapters (see `DatabasePolicyStore` above).
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
 After adding the enforcement-mode switch, `mvn verify` was re-run in this session
 against the project's configured Bouncy Castle 1.78.1: **84 tests passed**, with
 no failures or skips, the Admin Console JSP compiled, and the plugin assembly jar
-was built. The 1.84 compatibility variant was not re-run in this session.
+was built. The 1.84 compatibility variant was not re-run in this session. After
+adding room clearance and room label support, the full suite was re-run again:
+**291 tests passed**, with no failures or skips.
 
 `mvn verify` compiles the Admin Console JSP, runs the suite, and builds the plugin
 archive. Archive inspection checks generated servlet mappings and bundled JARs.
@@ -1080,9 +1123,127 @@ before implementation, resolving three explicit questions:
   fake of `UserClearanceStore`, the same pattern already used for
   `ConfigurationService`/`CatalogService`.
 
+## Room clearance and room label
+
+Administrators can give a MUC room its own clearance (gating labels of
+messages entering the room) and its own label (an ambient classification
+checked against a joining user's/peer's clearance). Confirmed with the user
+before implementation, across several rounds of clarification:
+
+- **Two distinct concepts, both wanted**: a room *clearance* (`RoomClearance`,
+  checked against message labels like server/peer/user clearance) and a room
+  *label* (`RoomLabel`, checked against a joining party's clearance, the
+  opposite direction of check). A room's default label for its own unlabelled
+  outgoing messages is a third, independently optional value
+  (`RoomLabel.defaultLabel`/`defaultLabelFormat`): it is **not** automatically
+  the same as the room label, but falls back to it when unset
+  (`RoomLabel.hasOwnDefaultLabel()`), exactly as the issue specified.
+- **Storage: new database tables, keyed by room JID, not `MUCRoom` properties.**
+  `MUCRoom` has no generic property API comparable to `User.getProperties()`
+  (unlike the precedent this issue's attached `UserPropertyClearanceStore`
+  suggested); the real precedent for "properties on a room" in the Openfire
+  ecosystem is the `mucextinfo` plugin, which keeps its own table keyed by
+  room JID. Following that precedent (and mirroring `PeerClearance`/
+  `ofSpiffingClearance`), `ofSpiffingRoomClearance` (keyed by `(roomJID,
+  policyID)`, since a room may hold a clearance for several loaded policies
+  at once, like `UserClearance`) and `ofSpiffingRoomLabel` (keyed by
+  `roomJID` alone, since a room has exactly one label) were added across all
+  six supported database dialects, with `databaseVersion` bumped from 1 to 2
+  and matching `upgrade/2/spiffing_*.sql` scripts. `roomJID` is sized at
+  `VARCHAR(255)` rather than the `VARCHAR(1024)` Openfire itself sometimes
+  uses for JID columns, because `ofSpiffingRoomClearance`'s composite primary
+  key would otherwise risk exceeding MySQL's InnoDB index-entry size limit —
+  Openfire's own `ofMucAffiliation`/`ofMucMember` tables work around the same
+  pitfall with a `jid(70)` prefix index instead. `DatabaseRoomClearanceStore`/
+  `DatabaseRoomLabelStore` implement `RoomClearanceStore`/`RoomLabelStore` via
+  plain JDBC, exactly like `DatabasePolicyStore`; `RoomClearanceService`/
+  `RoomLabelService` wrap them and are the types `SpiffingPlugin`/the Admin
+  Console/the interceptors depend on.
+- **Message-entering-room enforcement, mirroring peer/user clearance.**
+  `PolicyConfiguration` gained `checkRoomClearance(Element,
+  List<RoomClearance>)` and `checkDefaultRoomClearance(List<RoomClearance>)`,
+  sharing the same `authorizeAgainstClearances` helper (`"room "` prefix) as
+  server/peer/user checks, and resolved the same optional/no-op way: a room
+  with no clearance for any loaded policy does not block anything.
+  `SecurityLabelInterceptor` gained `Predicate<JID> isRoom`,
+  `Function<String, List<RoomClearance>> roomClearances`, and
+  `Function<String, Optional<RoomLabel>> roomLabel` constructor parameters
+  (defaulted to "never a room"/empty for every pre-existing call site and
+  test); when `message.getTo()`'s bare JID is a room, the room's clearance is
+  checked in addition to server/peer/user clearance, at both existing check
+  points (an explicit label, and before stamping a default onto an unlabelled
+  message).
+- **Room-aware default-label stamping.** When a message with no label enters
+  a room that has a `RoomLabel` configured, the interceptor stamps it with
+  `PolicyConfiguration.encodeRoomDefaultEnvelope(RoomLabel,
+  List<RoomClearance>)` — the room's own default label if set, otherwise the
+  room label itself — instead of the server-wide default, checking the room
+  clearance against that resolved label first. A room with no `RoomLabel`
+  configured is unaffected and keeps stamping the server-wide default exactly
+  as before.
+- **Join-gating via a new `MUCEventDelegate`, a different Openfire extension
+  point than `PacketInterceptor`.** Openfire has no interceptor hook for MUC
+  joins; `MultiUserChatService.setMUCDelegate(MUCEventDelegate)` is the
+  correct extension point (one delegate per service, invoked from
+  `MUCRoom.addMember`/the join path before presence is broadcast). `RoomJoinGate`
+  wraps any pre-existing delegate (Openfire allows only one; everything else
+  passes through unchanged) and, when the target room has a `RoomLabel`
+  configured, denies the join unless the joining party's clearance authorizes
+  the room's label: a local user's own `UserClearance`s
+  (`authorizeRoomJoinByUserClearance`, package-private
+  `isLocal.test(userjid)` distinguishes local from remote), or a remote
+  peer's domain clearance (`authorizeRoomJoinByPeerClearance`). Unlike the
+  message-level checks, an *absent* clearance here is an explicit denial, not
+  a no-op, per the issue's wording ("no visibility or capability to join...
+  unless the label was passed by their peer clearance"). The actual check
+  logic lives in a package-private `checkJoin(String roomJid, JID userjid)`,
+  factored out of the `MUCEventDelegate.joiningRoom(MUCRoom, JID)` override so
+  it is unit-testable without a live `MUCRoom` (which has heavyweight
+  construction dependencies on a running server). `SpiffingPlugin` installs
+  `RoomJoinGate` on every currently loaded `MultiUserChatService` at startup
+  and restores each service's original delegate at shutdown.
+- **Admin Console: a per-room sidebar page, mirroring the per-user page.**
+  `spiffing-room-clearance.jsp` is added to the `sidebar-groupchat-options`
+  sidebar (nested under `muc-room-summary`'s "Room Options", the same
+  location `mucextinfo`'s own per-room page uses), keyed off a `roomJid`
+  request parameter. It lists/add/deletes room clearances per policy and the
+  room's single label (including its optional distinct default label),
+  reusing the same interactive-builder/raw-payload toggle and per-policy
+  panel-switching JavaScript already used for peer/user clearances.
+  `SettingsForm.parseRoomClearance`/`parseRoomLabel` mirror
+  `parsePeerClearance`/`parsePolicy`'s validation and builder-mode
+  construction.
+- **Also surfaced in the live `muc#owner` room configuration form, best
+  effort.** There is no official Openfire extension point for adding fields
+  to this form; `RoomConfigFormInterceptor` injects/reads extra `<field/>`
+  elements, namespaced under `urn:xmpp:sec-label:0` so they cannot collide
+  with XEP-0045's own field vars (the same namespacing trick Openfire itself
+  uses for its own `{http://igniterealtime.org}muc#roomconfig_*` extension
+  fields). It hooks the same `PacketInterceptor` mechanism, watching for
+  `muc#owner` `query`/`x` elements on outgoing `result` IQs (to inject) and
+  incoming `set` IQs (to read back before `IQOwnerHandler` processes them;
+  it silently ignores field names it does not recognize, so this cannot break
+  anything). To avoid ambiguity about *which* policy a bare clearance/label
+  payload belongs to, it only activates when there is exactly one resolvable
+  policy (the server's configured default policy, or the sole loaded policy);
+  with zero or multiple ambiguous policies the extra fields are simply
+  omitted, and the Admin Console page remains the only way to manage that
+  room's clearance/label. This coupling is inherently fragile — it depends on
+  the current shape of `IQOwnerHandler`'s form and could silently stop
+  populating fields if that ever changes — so it is additive to, not a
+  replacement for, the Admin Console page.
+- **Not unit-tested directly**: `DatabaseRoomClearanceStore`/
+  `DatabaseRoomLabelStore` call `DbConnectionManager`, requiring a real
+  database connection, exactly like `DatabasePolicyStore`/
+  `DatabaseCatalogStore`; `RoomClearanceService`/`RoomLabelService` are
+  instead tested against in-memory fakes of their store interfaces.
+  `RoomJoinGate.joiningRoom(MUCRoom, JID)` itself is not directly tested
+  (constructing a real `MUCRoom` needs a running server); its `checkJoin`
+  core is tested directly instead.
+
 ## Deferred features
 
-Per-room clearance; a distinct clearance per specific federated peer/remote
+A distinct clearance per specific federated peer/remote
 domain (today's peer clearance is a single default applied to every peer); a
 distinct server clearance or default label per loaded policy (today's
 clearance and default label are both scoped to a single primary policy, even
