@@ -321,6 +321,60 @@ public final class PolicyConfiguration {
         authorizePeerClearance(decode(envelope), peerDomain);
     }
 
+    /**
+     * Authorizes the message's effective label against the sender's own clearances, one of which
+     * may apply if it is scoped to the label's policy (or a policy the label can be translated to).
+     * A sender with no clearance for any loaded policy is a no-op, exactly like an unconfigured
+     * peer clearance: user clearances are optional, not mandatory. Raw, undecoded clearances are
+     * passed in and resolved here against this registry's {@code site}, since a user may hold a
+     * stale clearance for a policy that is no longer loaded (silently ignored) or scoped to several
+     * different policies at once.
+     */
+    public void checkUserClearance(Element envelope, List<UserClearance> userClearances) {
+        Map<String, Clearance> clearances = resolveUserClearances(userClearances);
+        if (clearances.isEmpty()) return;
+        authorizeAgainstClearances(decode(envelope), clearances, "user ");
+    }
+
+    /** Like {@link #checkUserClearance}, but tests the configured default label itself, for a sender without a direct envelope. */
+    public void checkDefaultUserClearance(List<UserClearance> userClearances) {
+        if (defaultLabel == null) return;
+        Map<String, Clearance> clearances = resolveUserClearances(userClearances);
+        if (clearances.isEmpty()) return;
+        authorizeAgainstClearances(defaultLabel, clearances, "user ");
+    }
+
+    private Map<String, Clearance> resolveUserClearances(List<UserClearance> userClearances) {
+        if (userClearances == null || userClearances.isEmpty()) return Map.of();
+        Map<String, Clearance> result = new LinkedHashMap<>();
+        for (UserClearance uc : userClearances) {
+            Spif spif = resolvePolicy(uc.policyId());
+            if (spif == null) continue; // Stale clearance for a policy no longer loaded; ignore.
+            try {
+                if (uc.format() == LabelFormat.XML || uc.format() == LabelFormat.NATO) {
+                    SecureXml.parse(uc.clearance(), SecureXml.MAX_LABEL);
+                }
+                Clearance c = site.clearance(uc.format().decode(uc.clearance()), uc.format().format);
+                if (c.policy() != spif) continue; // Mismatched policy; ignore rather than fail the whole message.
+                result.put(spif.policyId(), c);
+            } catch (RuntimeException e) {
+                throw new IllegalArgumentException("The user clearance for policy '" + uc.policyId() + "' is invalid.", e);
+            }
+        }
+        return result;
+    }
+
+    private Spif resolvePolicy(String policyId) {
+        try {
+            return site.spif(policyId);
+        } catch (RuntimeException ignored) {
+            for (LoadedPolicy lp : loadedPolicies) {
+                if (lp.id().equals(policyId)) return site.spif(lp.id());
+            }
+            return null;
+        }
+    }
+
     private Label decode(Element envelope) {
         boundTree(envelope);
         if (!ENVELOPE.equals(envelope.getQName()) || !envelope.getTextTrim().isEmpty()) throw malformed();
@@ -344,23 +398,7 @@ public final class PolicyConfiguration {
         if (serverClearances.isEmpty()) {
             return; // Partial configuration without clearances passes validity check
         }
-        Clearance direct = serverClearances.get(label.policy().policyId());
-        if (direct != null) {
-            authorize(direct, label);
-            return;
-        }
-        // Translate to any policy for which we have a server clearance
-        for (Clearance c : serverClearances.values()) {
-            try {
-                Label translated = label.encrypt(c.policy().policyId(), site);
-                if (translated != null) {
-                    authorize(c, translated);
-                    return;
-                }
-            } catch (RuntimeException ignored) {
-            }
-        }
-        throw new IllegalArgumentException("No clearance available for policy: " + label.policy().name());
+        authorizeAgainstClearances(label, serverClearances, "");
     }
 
     private void authorizePeerClearance(Label label, String domain) {
@@ -370,7 +408,16 @@ public final class PolicyConfiguration {
             clearances = peerClearancesByDomain.get("");
         }
         if (clearances == null || clearances.isEmpty()) return;
+        authorizeAgainstClearances(label, clearances, "peer ");
+    }
 
+    /**
+     * Tests {@code label} directly against whichever of {@code clearances} is scoped to its
+     * policy, translating to any other policy in the map otherwise; shared by server, peer, and
+     * user clearance checks, which differ only in which map of policy id to {@link Clearance}
+     * applies and how the failure message should refer to that kind of clearance.
+     */
+    private void authorizeAgainstClearances(Label label, Map<String, Clearance> clearances, String kindPrefix) {
         Clearance direct = clearances.get(label.policy().policyId());
         if (direct != null) {
             authorize(direct, label);
@@ -386,7 +433,7 @@ public final class PolicyConfiguration {
             } catch (RuntimeException ignored) {
             }
         }
-        throw new IllegalArgumentException("No peer clearance available for policy: " + label.policy().name());
+        throw new IllegalArgumentException("No " + kindPrefix + "clearance available for policy: " + label.policy().name());
     }
 
     private void authorize(Clearance clearance, Label label) {

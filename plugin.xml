@@ -32,5 +32,13 @@
                       description="Named security labels offered to clients via XEP-0258 catalogue discovery"/>
             </sidebar>
         </tab>
+        <tab id="tab-users">
+            <sidebar id="sidebar-users-options">
+                <item id="spiffing-user-clearance"
+                      name="Spiffing clearance"
+                      url="spiffing-user-clearance.jsp"
+                      description="This user's security clearance for one or more loaded Spiffing policies"/>
+            </sidebar>
+        </tab>
     </adminconsole>
 </plugin>

@@ -37,6 +37,7 @@ public final class SpiffingPlugin implements Plugin {
 
     private ConfigurationService configuration;
     private CatalogService catalog;
+    private UserClearanceService userClearances;
     private final Runtime runtime;
     private SecurityLabelInterceptor interceptor;
     private CatalogIqHandler catalogIqHandler;
@@ -56,8 +57,13 @@ public final class SpiffingPlugin implements Plugin {
     }
 
     SpiffingPlugin(ConfigurationService configuration, CatalogService catalog, Runtime runtime) {
+        this(configuration, catalog, null, runtime);
+    }
+
+    SpiffingPlugin(ConfigurationService configuration, CatalogService catalog, UserClearanceService userClearances, Runtime runtime) {
         this.configuration = configuration;
         this.catalog = catalog;
+        this.userClearances = userClearances;
         this.runtime = runtime;
     }
 
@@ -70,13 +76,16 @@ public final class SpiffingPlugin implements Plugin {
         if (catalog == null) {
             catalog = new CatalogService(new DatabaseCatalogStore(), configuration::current);
         }
+        if (userClearances == null) {
+            userClearances = new UserClearanceService(new UserPropertyClearanceStore());
+        }
         try {
             configuration.reload();
         } catch (IllegalArgumentException e) {
             LOG.error("Stored Spiffing configuration is invalid; inbound messages are blocked. Reconfigure in the Admin Console.");
         }
         bootstrapPolicyIfConfigured();
-        interceptor = new SecurityLabelInterceptor(configuration::current, configuration::isCorrupted, runtime::reply);
+        interceptor = new SecurityLabelInterceptor(configuration::current, configuration::isCorrupted, userClearances::list, runtime::reply);
         runtime.addInterceptor(interceptor);
         runtime.addFeature(PolicyConfiguration.NAMESPACE);
         catalogIqHandler = new CatalogIqHandler(catalog, runtime::isLocal);
@@ -142,6 +151,8 @@ public final class SpiffingPlugin implements Plugin {
     }
 
     public ConfigurationService configurationService() { return configuration; }
+
+    public UserClearanceService userClearanceService() { return userClearances; }
 
     public boolean isConfigured() {
         PolicyConfiguration current = configuration.current();

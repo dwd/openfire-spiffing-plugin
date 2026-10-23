@@ -27,6 +27,15 @@ Clearances are stored in the database (`ofSpiffingPolicy` and `ofSpiffingClearan
   arrive from a peer (`IncomingServerSession`) or egress to a federated peer
   (`OutgoingServerSession`), the matching peer clearance (or default peer clearance)
   is consulted, translating across loaded policies if needed.
+- **User Clearances**: Stored as `UserProperty` pairs on the local `User`
+  object itself (`plugin.spiffing.clearance.<policyId>` and
+  `plugin.spiffing.clearance.<policyId>.format`), not in `ofSpiffingPolicy`/
+  `ofSpiffingClearance`. A user may hold at most one clearance per loaded
+  policy, but one for several different policies at once. When a message
+  arrives from a local client (i.e. not via an `IncomingServerSession`), the
+  sender JID's node is looked up (`UserClearanceService.list`) and every
+  returned clearance is consulted against the message's effective label,
+  translating across loaded policies exactly like server/peer clearances.
 
 ## Objects that have a label
 
@@ -55,15 +64,21 @@ or the underlying Spiffing `Label`), each with its own lifecycle:
   are individually decoded, validated, and translated/verified for equivalence against
   the primary label.
 
+User clearances themselves do not carry a label; they are consulted as an
+additional clearance (see above), the same way server and peer clearances are.
+
 ## Points in a message's lifetime where checks occur
 
 Real ACDF checks (`Spif.assertValid` and/or `Spif.acdf`) happen at two points:
 always on the **inbound** path before the message is handed off for delivery,
 and, since the "Peer clearance" increment, also on the **egress** path to a
 federated peer, but only for the narrower peer-clearance decision (see below).
-Nothing else in a message's lifetime is re-checked. The `SecurityLabelInterceptor`
-callback (`incoming && !processed`, i.e. before Openfire's `MessageRouter`
-processes the packet) does the following, for every non-error message:
+Since the "User clearance" increment, the inbound path's server-clearance
+decision is additionally joined by a user-clearance decision when the sender
+is a local client (see step 3/4 below). Nothing else in a message's lifetime
+is re-checked. The `SecurityLabelInterceptor` callback (`incoming &&
+!processed`, i.e. before Openfire's `MessageRouter` processes the packet)
+does the following, for every non-error message:
 
 1. **Error messages bypass all checks.** An error carrying a direct
    XEP-0258 label is discarded (`PacketRejectedException`) without ever being
@@ -79,17 +94,20 @@ processes the packet) does the following, for every non-error message:
    unchecked and unmodified: no stamping, no access-control decision, no
    reply. This distinction was added so that installing the plugin can never
    disrupt existing traffic before an administrator configures it.
-3. **Unlabelled messages are stamped, and, from a federated peer, also
-   checked against the peer clearance first.** A message with no direct
+3. **Unlabelled messages are stamped, and, from a federated peer or a local
+   sender with a clearance, also checked first.** A message with no direct
    envelope receives a copy of the already-validated default; there is
    normally nothing to run server-clearance ACDF against, because the sender
    supplied nothing. However, when the message arrives via an
    `IncomingServerSession`, `PolicyConfiguration.checkDefaultPeerClearance()`
    first tests the *default* label itself against the peer clearance (a no-op
-   without one configured), before it is attached.
+   without one configured); and, for a local sender, `checkDefaultUserClearance()`
+   likewise tests it against any clearances configured for that sender's
+   username (a no-op if they have none) — both before the default is attached.
 4. **A single labelled envelope is validated and access-checked exactly
    once against the server clearance, plus once more against the peer
-   clearance for federated senders.** `PolicyConfiguration.check` bounds the
+   clearance for federated senders or the user clearance for local senders.**
+   `PolicyConfiguration.check` bounds the
    XML tree, decodes the primary label (and any equivalent labels) under
    whichever loaded policy the label itself declares, translates it to the
    primary policy first if it named a different, secondary loaded policy, and
@@ -97,8 +115,13 @@ processes the packet) does the following, for every non-error message:
    arrived via an `IncomingServerSession`, the
    same decoded effective label is also tested with `acdf` against the peer
    clearance (via `check`'s `checkPeerClearance` boolean parameter, a no-op
-   without one configured); equivalent labels are **not** re-tested
-   against the peer clearance, only the effective primary label. An empty
+   without one configured). When the message instead came from a local client,
+   `PolicyConfiguration.checkUserClearance` tests the same effective label
+   against any clearances configured for the sender's username (a no-op
+   without any); a federated peer's message is never checked against a user
+   clearance, since its sender JID's node is a remote user this server has no
+   authority over. In both cases, equivalent labels are **not** re-tested
+   against the peer or user clearance, only the effective primary label. An empty
    primary `<label/>` is treated as an explicit request for the default and
    replaced with a fresh copy after validating any equivalents. More than one
    direct envelope is always rejected as malformed.
@@ -107,9 +130,9 @@ processes the packet) does the following, for every non-error message:
    `forbidden` error and a `PacketRejectedException`; `WARN` logs the failure
    (sender, recipient, stanza ID, and reason — never the body or label
    payload) and lets the message through completely unchanged. This applies
-   identically whether the failure came from the server-clearance or the
-   peer-clearance decision — there is no separate enforcement knob for the
-   peer clearance.
+   identically whether the failure came from the server-clearance, the
+   peer-clearance, or the user-clearance decision — there is no separate
+   enforcement knob for either the peer or the user clearance.
 
 Everything else in the message's lifetime is explicitly **not** checked
 again, with one narrower exception on egress to a federated peer:
@@ -182,10 +205,13 @@ validity) is made per ordinary inbound message, at the single pre-processing
 inbound hook; a federated inbound or outbound message additionally gets one
 peer-clearance-only `acdf` decision (a no-op without a configured peer
 clearance), at that same inbound hook or at the pre-send outbound hook,
-respectively. No message is re-checked at any other point in its lifetime.
-This entire pipeline only runs once the plugin has an active or corrupted
-configuration to react to; a plugin that has never been configured at all
-performs no check whatsoever and never touches a message.
+respectively; a local-client inbound message instead additionally gets one
+user-clearance-only `acdf` decision per clearance the sender holds (a no-op
+without any), at that same inbound hook. No message is re-checked at any
+other point in its lifetime. This entire pipeline only runs once the plugin
+has an active or corrupted configuration to react to; a plugin that has never
+been configured at all performs no check whatsoever and never touches a
+message.
 
 ## Summary table
 
@@ -194,9 +220,9 @@ performs no check whatsoever and never touches a message.
 | Inbound, before processing (error message) | No | Discarded if labelled; otherwise passed through unchecked |
 | Inbound, before processing (corrupted stored configuration) | No | Rejected, `service-unavailable` |
 | Inbound, before processing (never configured) | No | Passed through completely unchecked and unmodified |
-| Inbound, before processing (unlabelled, local client) | Yes, `acdf` against the server clearance only, on the *default* label, already validated at config time | Stamped with a copy of the default |
+| Inbound, before processing (unlabelled, local client) | Yes, `acdf` against the server clearance (at config time) **and** the user clearance (per message, no-op if the sender has none), on the *default* label | Stamped with a copy of the default, or rejected/warned if the sender's own clearance denies it |
 | Inbound, before processing (unlabelled, federated peer) | Yes, `acdf` against the server clearance (at config time) **and** the peer clearance (per message, no-op if unconfigured), on the *default* label | Stamped with a copy of the default, or rejected/warned if the peer clearance denies it |
-| Inbound, before processing (labelled, local client) | **Yes**, `acdf` against the server clearance only | Accepted unchanged, replaced by the default (empty `<label/>`), or rejected/warned |
+| Inbound, before processing (labelled, local client) | **Yes**, `acdf` against the server clearance **and** the user clearance (no-op if the sender has none) | Accepted unchanged, replaced by the default (empty `<label/>`), or rejected/warned |
 | Inbound, before processing (labelled, federated peer) | **Yes**, `acdf` against the server clearance **and** the peer clearance (no-op if unconfigured) | Accepted unchanged, replaced by the default (empty `<label/>`), or rejected/warned |
 | Inbound, after processing / delivery | No | No further check of any kind |
 | Outbound, before send, to a local client/component | No | Untouched |

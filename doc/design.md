@@ -37,7 +37,10 @@ dependency compatibility" below). Direct file upload for SPIF policies was
 added to the Admin Console on October 4, 2026 (see "SPIF file upload" below).
 Catalogue entry names were made optional in the catalogue editor on October 8,
 2026, defaulting to the display marking calculated from the label (see
-"Label catalogue" below).
+"Label catalogue" below). Per-user clearances, stored as `UserProperty` pairs
+on the local user and enforced against a local sender's own message labels in
+addition to the existing server/peer clearances, were added October 23, 2026
+(see "User clearance" below); `doc/acdf-checks.md` was updated accordingly.
 
 ## Objective and confirmed requirements
 
@@ -64,8 +67,10 @@ increment; they can be revised independently of the confirmed requirements:
   distinction and its rationale. A working configuration remains active when
   an Admin Console save is rejected.
 
-The server clearance covers local-client and federated traffic. No per-user or
-per-room clearance is inferred from the server clearance.
+The server clearance covers local-client and federated traffic. A separate,
+optional per-user clearance (see "User clearance" below) additionally
+constrains a local sender's own messages; per-room clearance is still not
+inferred from either.
 
 ## Components and configuration lifecycle
 
@@ -601,6 +606,28 @@ message objects. Coverage includes:
   defensive copying) and the new multi-policy `SettingsForm.save` overload
   (ordering, CSRF enforcement, empty-list rejection) alongside every
   pre-existing single-policy constructor/accessor/form call site, unchanged.
+- User clearance: `UserClearanceTest` covers `UserClearance`'s own validation
+  (missing/blank username, policy id, clearance, format, and an oversized
+  payload). `UserClearanceServiceTest` covers save/list/delete/replace against
+  an in-memory `UserClearanceStore` fake, including per-user isolation and a
+  blank/null username short-circuiting without consulting the store.
+  `PolicyConfigurationTest` covers `checkUserClearance`/`checkDefaultUserClearance`:
+  a no-op with no clearances, a permissive clearance permitting a label, a
+  restrictive clearance rejecting a label the server clearance alone permits
+  (confirming the user check runs in addition to, not instead of, the server
+  check), the same pair against the configured default label, a stale/unloaded policy id
+  ignored rather than rejected, a malformed clearance payload rejected, and
+  cross-policy translation of the checked label against a clearance scoped to
+  a different loaded policy. `SecurityLabelInterceptorTest` covers: a local
+  sender's labelled or unlabelled (default-stamped) message permitted or
+  denied by their own clearance in both enforce (rejected) and warn (logged,
+  unchanged) modes; the check is a no-op without any configured user
+  clearance; and a federated/peer message is never checked against the
+  sender JID's node as a user clearance (confirmed by a fake clearance lookup
+  that fails the test if ever invoked for that path).
+  `UserPropertyClearanceStore` is not unit-tested directly, matching the
+  existing precedent for `UserManager`-backed adapters (see "Test coverage"
+  entry for `JiveGlobalsConfigurationStore` above).
 
 Local verification: **79 tests passed**, with no failures or skips, against both
 Bouncy Castle 1.78.1 and 1.84 on Java 25. A clean build and JSP compilation passed.
@@ -699,6 +726,17 @@ plugin assembly jar was built, all resolved against the locally cached
 5.2.0-SNAPSHOT parent/`xmppserver`/Bouncy Castle 1.84 artifacts. The 1.78.1
 compatibility variant (matching the now-superseded 5.0.0 release line) was not
 re-run in this session.
+
+After adding per-user clearances, `mvn verify` was re-run in this session:
+**211 tests passed**, with no failures or skips, the Admin Console JSPs
+(including the new `spiffing-user-clearance.jsp`) compiled, and the plugin
+assembly jar was built. As noted above, `UserPropertyClearanceStore` is not
+unit-tested directly since it requires a live `UserManager`; coverage instead
+exercises `UserClearanceService` against an in-memory fake and
+`SecurityLabelInterceptor`/`PolicyConfiguration` user-clearance enforcement
+directly. A live Admin Console smoke test of the new per-user sidebar page
+(navigating from "User Summary" into the new "Spiffing clearance" tab) was not
+performed in this session.
 
 ## Database-backed policies and partial configuration
 
@@ -940,11 +978,113 @@ in addition to raw payload input:
   - `SettingsForm.inspectPolicy` extracts active default label classifications, categories, and display
     markings into `PolicyClearanceMetadata`.
 
+## User clearance
+
+Administrators can give an individual local user their own clearance,
+constraining which labels that user is permitted to send, in addition to the
+server-wide and peer clearances already enforced. Confirmed with the user
+before implementation, resolving three explicit questions:
+
+- **Storage: a `UserProperty` pair per policy, not a `PolicyStore` table**: a
+  user may hold a clearance for several different loaded policies at once (the
+  user explicitly asked for "multiple, bound to any policy the server
+  supports"), so `UserClearance` uses `(username, policyId)` as its natural
+  key rather than a synthetic id like `PeerClearance`. `UserPropertyClearanceStore`
+  persists each clearance as two `UserProperty` values on the `User` object
+  (`UserManager.getInstance().getUser(username).getProperties()`):
+  `plugin.spiffing.clearance.<policyId>` holds the raw clearance payload and
+  `plugin.spiffing.clearance.<policyId>.format` holds its `LabelFormat` name.
+  This follows the issue's explicit instruction ("a user's clearance shall be
+  stored as a UserProperty") and keeps clearances with the user record itself,
+  unlike the database-table-backed server/peer clearances in
+  `ofSpiffingClearance`, which belong to the server/policy configuration, not
+  to any one user account. `list()` silently skips a corrupted or
+  unrecognized entry (missing counterpart property, unparseable
+  `LabelFormat`) rather than failing the whole listing for one user; `UserClearanceService`
+  wraps the store and is the type `SpiffingPlugin`/the Admin Console/the
+  interceptor depend on, exactly mirroring `ConfigurationService`'s role for
+  policy data.
+- **Bound to a specific policy, mirroring `PeerClearance`**: `UserClearance`
+  carries `username`, `policyId`, `clearance`, and `format`, validated by a
+  compact canonical constructor (non-blank username/policyId/clearance, a
+  non-null format, and the same `SecureXml.MAX_LABEL`-bounded size check
+  already used elsewhere) exactly like `PeerClearance`'s own validation. A
+  user's clearance for one policy is independent of their clearance for
+  another; there is no cross-policy translation of a *user's stored
+  clearance* itself (translation still happens for the *label being
+  checked*, exactly as it already does for server/peer clearances — see
+  "Multiple policies" above).
+- **Enforcement is included in this increment, not deferred**: the user
+  explicitly chose to "include enforcement now" rather than ship storage/
+  editing alone. `PolicyConfiguration` gained `checkUserClearance(Element,
+  List<UserClearance>)` and `checkDefaultUserClearance(List<UserClearance>)`,
+  parallel to the existing peer-clearance methods. Both resolve each raw
+  `UserClearance` against this registry's `site` (`resolveUserClearances`),
+  silently ignoring a clearance for a policy id that is not currently loaded
+  (a stale clearance left over after a policy was removed) or whose decoded
+  policy does not match the requested `policyId` (defensive, should not
+  normally occur), but raising `IllegalArgumentException` for a clearance that
+  fails to parse/decode under its claimed policy — a configuration error on an
+  existing, matching policy is not silently swallowed the way a stale
+  reference is. A user with no clearance at all for any loaded policy is a
+  no-op, exactly like peer clearance: user clearances are optional, not
+  mandatory, so installing this feature cannot break an existing deployment
+  until an administrator actually sets one.
+  - Server, peer, and user clearance checks now share one private helper,
+    `authorizeAgainstClearances(Label, Map<String, Clearance>, String
+    kindPrefix)`, extracted from the identical direct-match-then-translate
+    logic that `authorizeServerClearance`/`authorizePeerClearance` already
+    had; `kindPrefix` only changes the rejection message's wording ("", "peer
+    ", "user ").
+  - **Scope: local senders only, not federated peers.** `SecurityLabelInterceptor`
+    derives a `senderUsername` from `message.getFrom().getNode()` only when
+    the session is *not* `IncomingServerSession` (i.e. not a federated peer);
+    a federated sender's JID node is a remote user's local identity, which
+    this server cannot authoritatively look up a clearance for, and that path
+    already has its own, separate peer-clearance check. The interceptor takes
+    a new `Function<String, List<UserClearance>>` constructor parameter
+    (`UserClearanceService::list` in `SpiffingPlugin`), called once per
+    message and passed straight into `checkUserClearance`/
+    `checkDefaultUserClearance`, at the same two points peer clearance is
+    checked (an explicit label, and before stamping the default onto an
+    unlabelled message). A three-argument constructor overload defaults this
+    function to `username -> List.of()`, preserving every existing call site
+    and test exactly as a user with no clearances configured.
+  - **Failure handling** follows `Settings.enforcementMode` exactly like every
+    other clearance check: `ENFORCE` rejects with the existing sanitized
+    `forbidden` reply path; `WARN` logs and lets the message through
+    unchanged. There is no separate on/off switch for user-clearance
+    enforcement.
+- **Admin Console placement: a new per-user sidebar page, not a username
+  selector on the settings page.** The user explicitly chose "per-user
+  sidebar page," matching how Openfire itself organizes per-user
+  configuration (`user-properties.jsp`, `user-password.jsp`, etc. under the
+  `sidebar-users-options` group, all keyed off the `username` request
+  parameter carried between sibling tabs by the Admin Console framework
+  itself). `plugin.xml` adds a `spiffing-user-clearance` item to that same
+  `sidebar-users-options` sidebar (alongside the existing `tab-server`
+  entries, unaffected), pointing at the new `spiffing-user-clearance.jsp`. The
+  page lists the viewed user's current clearances (policy, format, delete
+  action) and a form to add/replace one for a chosen loaded policy, reusing
+  the exact same interactive-builder/raw-payload toggle, per-policy panel
+  switching, and file-upload/drag-and-drop JavaScript already used for peer
+  clearances on `spiffing-settings.jsp` ("the same clearance editor capability
+  we've already developed," per the issue). `SettingsForm.parseUserClearance`
+  mirrors `parsePeerClearance`'s validation and builder-mode construction,
+  keyed by `username`/`policyId` fields instead of `domain`/`policyId`.
+- **Not unit-tested directly**: `UserPropertyClearanceStore` calls
+  `UserManager.getInstance()`, a real Openfire singleton requiring a running
+  server context, exactly like `DatabasePolicyStore`/`DatabaseCatalogStore`;
+  it is therefore not covered by a dedicated unit test, following the same
+  precedent. `UserClearanceService` is instead tested against an in-memory
+  fake of `UserClearanceStore`, the same pattern already used for
+  `ConfigurationService`/`CatalogService`.
+
 ## Deferred features
 
-Per-user and per-room clearances; a distinct clearance per specific federated
-peer/remote domain (today's peer clearance is a single default applied to every
-peer); a distinct server clearance or default label per loaded policy (today's
+Per-room clearance; a distinct clearance per specific federated peer/remote
+domain (today's peer clearance is a single default applied to every peer); a
+distinct server clearance or default label per loaded policy (today's
 clearance and default label are both scoped to a single primary policy, even
 when multiple policies are loaded); MUC history and recipient filtering;
 catalogue discovery for remote/federated entities (a request's `from=` must

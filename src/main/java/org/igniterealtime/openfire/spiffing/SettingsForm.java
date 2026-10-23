@@ -190,6 +190,48 @@ public final class SettingsForm {
         return new PeerClearance(id, domain.trim(), policyId.trim(), clearance, format);
     }
 
+    public static UserClearance parseUserClearance(Map<String, String> fields) {
+        return parseUserClearance(fields, null, null, null);
+    }
+
+    public static UserClearance parseUserClearance(Map<String, String> fields, Collection<String> classifications, Collection<String> categories, Spif spif) {
+        String username = fields.get("username");
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username is required for a user clearance.");
+        }
+        String policyId = fields.get("policyId");
+        if (policyId == null || policyId.isBlank()) {
+            throw new IllegalArgumentException("Policy selection is required for a user clearance.");
+        }
+
+        String clearanceMode = fields.get("clearanceMode");
+        String clearance;
+        LabelFormat format;
+        String formatStr = fields.get("format");
+
+        if ("builder".equalsIgnoreCase(clearanceMode)) {
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.ESS;
+            boolean hasClassifications = classifications != null && classifications.stream().anyMatch(c -> c != null && !c.isBlank());
+            boolean hasCategories = categories != null && categories.stream().anyMatch(c -> c != null && !c.isBlank());
+            if (!hasClassifications && !hasCategories) {
+                throw new IllegalArgumentException("At least one classification or category must be selected for a user clearance in builder mode.");
+            }
+            if (spif == null) {
+                throw new IllegalArgumentException("SPIF policy is required to build a user clearance.");
+            }
+            Clearance c = buildClearance(spif, classifications, categories);
+            clearance = format.encode(c);
+        } else {
+            clearance = fields.get("clearance");
+            if (clearance == null || clearance.isBlank()) {
+                throw new IllegalArgumentException("Clearance document is required.");
+            }
+            format = formatStr != null && !formatStr.isBlank() ? LabelFormat.valueOf(formatStr) : LabelFormat.ESS;
+        }
+
+        return new UserClearance(username.trim(), policyId.trim(), clearance, format);
+    }
+
     public static Clearance buildClearance(Spif spif, Collection<String> classificationLacvs, Collection<String> categorySpecs) {
         Objects.requireNonNull(spif, "spif");
         Clearance clearance = new Clearance(spif);

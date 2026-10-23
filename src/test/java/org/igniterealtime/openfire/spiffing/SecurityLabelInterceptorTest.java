@@ -417,4 +417,70 @@ class SecurityLabelInterceptorTest {
         assertEquals(beforeAfterSend, afterSend.toXML());
         assertTrue(replies.isEmpty());
     }
+
+    private Message localMessage() {
+        Message message = message();
+        message.setFrom("alice@local.example/phone");
+        return message;
+    }
+
+    @Test void inboundLocalLabelPermittedByUserClearanceIsAccepted() throws Exception {
+        var userClearance = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        var userInterceptor = new SecurityLabelInterceptor(() -> configuration, () -> false, username -> List.of(userClearance), replies::add);
+        var message = localMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        userInterceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void inboundLocalLabelDeniedByUserClearanceIsRejectedInEnforceMode() {
+        var userClearance = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var userInterceptor = new SecurityLabelInterceptor(() -> configuration, () -> false, username -> List.of(userClearance), replies::add);
+        var message = localMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        assertThrows(PacketRejectedException.class, () -> userInterceptor.interceptPacket(message, null, true, false));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void inboundLocalLabelDeniedByUserClearanceIsWarnedAboutInWarnMode() throws Exception {
+        SpiffingProperties.setEnforcementMode(EnforcementMode.WARN);
+        var userClearance = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var userInterceptor = new SecurityLabelInterceptor(() -> configuration, () -> false, username -> List.of(userClearance), replies::add);
+        var message = localMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        userInterceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void unlabelledLocalMessageIsCheckedAgainstUserClearanceBeforeStampingDefault() {
+        var userClearance = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        var userInterceptor = new SecurityLabelInterceptor(() -> configuration, () -> false, username -> List.of(userClearance), replies::add);
+        var message = localMessage();
+        assertThrows(PacketRejectedException.class, () -> userInterceptor.interceptPacket(message, null, true, false));
+        assertNull(message.getElement().element(PolicyConfiguration.ENVELOPE));
+        assertEquals(PacketError.Condition.forbidden, replies.get(0).getError().getCondition());
+    }
+
+    @Test void userClearanceCheckIsANoOpWithoutAnyConfiguredUserClearance() throws Exception {
+        var message = localMessage();
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        String before = message.toXML();
+        interceptor.interceptPacket(message, null, true, false);
+        assertEquals(before, message.toXML());
+        assertTrue(replies.isEmpty());
+    }
+
+    @Test void federatedInboundMessagesAreNotCheckedAgainstTheSenderNodeAsAUserClearance() throws Exception {
+        boolean[] consulted = {false};
+        var userInterceptor = new SecurityLabelInterceptor(() -> configuration, () -> false,
+            username -> { consulted[0] = true; return List.of(); }, replies::add);
+        var message = message(); // from a remote domain, routed via a federated session
+        message.getElement().add(Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML));
+        userInterceptor.interceptPacket(message, incomingServerSession(), true, false);
+        assertFalse(consulted[0], "Federated messages must be checked against peer clearance, not sender-node user clearance");
+    }
 }

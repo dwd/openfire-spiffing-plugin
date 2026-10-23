@@ -12,13 +12,16 @@ import org.xmpp.packet.Message;
 import org.xmpp.packet.Packet;
 import org.xmpp.packet.PacketError;
 
+import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 public final class SecurityLabelInterceptor implements PacketInterceptor {
     private static final Logger LOG = LoggerFactory.getLogger(SecurityLabelInterceptor.class);
     private final Supplier<PolicyConfiguration> configuration;
     private final Supplier<Boolean> corrupted;
+    private final Function<String, List<UserClearance>> userClearances;
     private final Consumer<Message> reply;
 
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Consumer<Message> reply) {
@@ -26,8 +29,18 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
     }
 
     public SecurityLabelInterceptor(Supplier<PolicyConfiguration> configuration, Supplier<Boolean> corrupted, Consumer<Message> reply) {
+        this(configuration, corrupted, username -> List.of(), reply);
+    }
+
+    public SecurityLabelInterceptor(
+        Supplier<PolicyConfiguration> configuration,
+        Supplier<Boolean> corrupted,
+        Function<String, List<UserClearance>> userClearances,
+        Consumer<Message> reply
+    ) {
         this.configuration = configuration;
         this.corrupted = corrupted;
+        this.userClearances = userClearances;
         this.reply = reply;
     }
 
@@ -54,17 +67,24 @@ public final class SecurityLabelInterceptor implements PacketInterceptor {
         }
         boolean fromPeer = session instanceof IncomingServerSession;
         String peerDomain = fromPeer && message.getFrom() != null ? message.getFrom().getDomain() : "";
+        String senderUsername = !fromPeer && message.getFrom() != null ? message.getFrom().getNode() : null;
         EnforcementMode enforcementMode = SpiffingProperties.getEnforcementMode();
         try {
             if (labels.size() > 1) throw new IllegalArgumentException("Multiple security label envelopes are not permitted.");
             if (labels.isEmpty()) {
                 if (snapshot.hasDefaultLabel()) {
                     if (fromPeer) snapshot.checkDefaultPeerClearance(peerDomain);
+                    if (senderUsername != null && !senderUsername.isBlank()) {
+                        snapshot.checkDefaultUserClearance(userClearances.apply(senderUsername));
+                    }
                     message.getElement().add(snapshot.defaultEnvelope());
                 }
             } else {
                 Element original = labels.get(0);
                 Element checked = snapshot.check(original, fromPeer, peerDomain);
+                if (senderUsername != null && !senderUsername.isBlank()) {
+                    snapshot.checkUserClearance(checked, userClearances.apply(senderUsername));
+                }
                 if (checked != original) {
                     original.detach();
                     message.getElement().add(checked);

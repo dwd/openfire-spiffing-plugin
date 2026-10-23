@@ -354,4 +354,56 @@ class PolicyConfigurationTest {
         assertThrows(IllegalArgumentException.class, () -> configuration.loadedPolicyById("unknown"));
         assertThrows(IllegalArgumentException.class, () -> configuration.loadedPolicyByName("unknown"));
     }
+
+    @Test void noUserClearanceIsANoOp() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, List.of()));
+        assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, null));
+        assertDoesNotThrow(() -> configuration.checkDefaultUserClearance(List.of()));
+    }
+
+    @Test void checkPermitsLabelWhenUserClearanceIsPermissive() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, List.of(uc)));
+    }
+
+    @Test void checkRejectsLabelDeniedByUserClearanceEvenWhenServerClearancePermitsIt() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.checkUserClearance(envelope, List.of(uc)));
+    }
+
+    @Test void checkDefaultUserClearanceAgainstTheConfiguredDefaultLabel() {
+        var configuration = Fixtures.configuration();
+        var permissive = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkDefaultUserClearance(List.of(permissive)));
+        var restrictive = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.checkDefaultUserClearance(List.of(restrictive)));
+    }
+
+    @Test void userClearanceForAStalePolicyIsIgnored() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var stale = new UserClearance("alice", "1.2.826.0.1.9999999", Fixtures.read("food-clearance-lactose-intolerant"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, List.of(stale)));
+    }
+
+    @Test void malformedUserClearanceThrows() {
+        var configuration = Fixtures.configuration();
+        var envelope = Fixtures.envelope("food-label-milk-chocolate", LabelFormat.XML);
+        var malformed = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", "<clearance xmlns='http://surevine.com/xmlns/spiffy'><policy id='1.2.826.0.1.6726289.0.0'>Food</policy>not valid</clearance>", LabelFormat.XML);
+        assertThrows(IllegalArgumentException.class, () -> configuration.checkUserClearance(envelope, List.of(malformed)));
+    }
+
+    @Test void userClearanceCanBeTranslatedAcrossLoadedPolicies() {
+        var configuration = Fixtures.configurationWithSecondPolicy();
+        var envelope = Fixtures.xml("<securitylabel xmlns='urn:xmpp:sec-label:0'><label/></securitylabel>");
+        envelope.elements().get(0).add(drinkSpiffyLabel("10", "0"));
+        var uc = new UserClearance("alice", "1.2.826.0.1.6726289.0.0", Fixtures.read("food-clearance-all-okay"), LabelFormat.XML);
+        assertDoesNotThrow(() -> configuration.checkUserClearance(envelope, List.of(uc)));
+    }
 }
